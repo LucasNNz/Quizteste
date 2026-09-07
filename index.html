@@ -1697,13 +1697,14 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
       const cx=Math.round((Number(box.x)+Number(box.w)/2)/100*canvas.w);
       const h=state.frameShape==='round'?Number(box.w)*canvas.w/canvas.h:Number(box.h);
       const base=Math.round((Number(box.y)+h)/100*canvas.h);
-      cardLines.push(`${k.toUpperCase()}_CENTER_X=${cx}`,`${k.toUpperCase()}_BASE_Y=${base}`);
+      cardLines.push(`${k.toUpperCase()}_CENTER_X=${cx}`,`${k.toUpperCase()}_BASE_Y=${base}`,`${k.toUpperCase()}_SCALE=${Math.round(Number(state[k]?.cardScale)||100)}`);
     }
     return [
       '# CORVO STUDIO — EXEMPLO DE COORDENADAS',
       '# Formato atual: '+state.format+' ('+canvas.w+'x'+canvas.h+')',
       '#',
       '# CARDS A-D: valores sem unidade usam pixels de referência.',
+      '# A_SCALE controla a escala do card (ex.: 80 = 80%).',
       '# Você pode apagar C/D quando não estiver usando essas opções.',
       'SET_SCENE_PLACEMENT',
       `REFERENCE_WIDTH=${canvas.w}`,
@@ -2356,7 +2357,7 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
       const u=k.toUpperCase();
       if(finiteValue(slot.centerX))lines.push(`${u}_CENTER_X=${Number(slot.centerX)}`);
       if(finiteValue(slot.baseY))lines.push(`${u}_BASE_Y=${Number(slot.baseY)}`);
-      if(finiteValue(slot.cardScale))lines.push(`${u}_CARD_SCALE=${Math.round(Number(slot.cardScale))}`);
+      if(finiteValue(slot.cardScale))lines.push(`${u}_SCALE=${Math.round(Number(slot.cardScale))}`);
       if(finiteValue(slot.rotateY))lines.push(`${u}_ROTATE_Y=${Math.round(Number(slot.rotateY))}`);
       if(finiteValue(slot.rotateX))lines.push(`${u}_ROTATE_X=${Math.round(Number(slot.rotateX))}`);
     }
@@ -2396,10 +2397,98 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
     const keys=OPTION_KEYS.filter(k=>state[k]?.visible!==false);
     const transformLines=['','==================================================','TRANSFORMAÇÕES DOS CARDS','==================================================',''];
     for(const k of keys){
-      transformLines.push(`OPÇÃO ${k.toUpperCase()}`,`CARD_SCALE = ${Math.round(Number(state[k].cardScale)||100)}%`,`ROTATE_Y = ${Math.round(Number(state[k].tiltY)||0)}°`,`ROTATE_X = ${Math.round(Number(state[k].tiltX)||0)}°`,'');
+      transformLines.push(`OPÇÃO ${k.toUpperCase()}`,`SCALE = ${Math.round(Number(state[k].cardScale)||100)}%`,`ROTATE_Y = ${Math.round(Number(state[k].tiltY)||0)}°`,`ROTATE_X = ${Math.round(Number(state[k].tiltX)||0)}°`,'');
     }
     transformLines.push('==================================================','BLOCO PRONTO PARA REAPLICAR NO CAMPO DE COORDENADAS','==================================================','',placementToText(buildPlacementFromScene(state)),'');
     return base+'\n'+transformLines.join('\n');
+  };
+
+
+  /* ===== Round-frame repair: preserve coordinates and keep images alive ===== */
+  const roundFixStyle=document.createElement('style');
+  roundFixStyle.textContent=`
+    .picture{display:block}
+    .picture img{display:block;object-position:center center}
+    .scene[data-frame-shape="round"] .picture img{display:block;width:100%;height:100%;object-fit:contain;object-position:center center}
+    .scene[data-frame-shape="round"] .picture .original{display:block;width:100%;height:100%;left:0;top:0;object-fit:cover;max-width:none}
+  `;
+  document.head.appendChild(roundFixStyle);
+
+  const previousBuildPlacementRoundFix=buildPlacementFromScene;
+  buildPlacementFromScene=function(scene=state){
+    ensureSceneExtras(scene);
+    const canvas=sceneCanvas(scene.format);
+    const placement={referenceWidth:canvas.w,referenceHeight:canvas.h,overlays:[null,null,null]};
+    for(const k of OPTION_KEYS){
+      if(scene?.[k]?.visible===false)continue;
+      const box=scene.layout?.options?.[k];
+      if(!box)continue;
+      const w=canvas.w*(Number(box.w)||0)/100;
+      const h=scene.frameShape==='round'?w:canvas.h*(Number(box.h)||0)/100;
+      placement[k]={centerX:Math.round(canvas.w*(Number(box.x)||0)/100+w/2),baseY:Math.round(canvas.h*(Number(box.y)||0)/100+h)};
+      if(finiteValue(scene[k]?.cardScale))placement[k].cardScale=Math.round(Number(scene[k].cardScale)||100);
+      if(finiteValue(scene[k]?.tiltX))placement[k].rotateX=Math.round(Number(scene[k].tiltX)||0);
+      if(finiteValue(scene[k]?.tiltY))placement[k].rotateY=Math.round(Number(scene[k].tiltY)||0);
+    }
+    (scene.overlays||[]).forEach((slot,i)=>{
+      if(!slot)return;
+      const hasAsset=!!(slot.image||slot.imageUrl||slot.assetId);
+      if(!hasAsset)return;
+      placement.overlays[i]={centerPct:num(slot.x,1),basePct:num(slot.y,1),scale:Math.round(Number(slot.scale)||0),depth:slot.depth||'under',name:(slot.name||('Camada '+(i+1))).slice(0,40)};
+    });
+    return placement;
+  };
+
+  function ensureOptionPictureNode(key,opt,p){
+    if(!p||!opt)return;
+    const expectedSrc=opt.image||opt.imageUrl||'';
+    if(!expectedSrc)return;
+    const currentImg=p.querySelector('img');
+    if(currentImg&&currentImg.src===expectedSrc)return;
+    p.replaceChildren();
+    p.style.backgroundImage='none';
+    const im=new Image();
+    im.src=expectedSrc;
+    im.alt=opt.label||('Opção '+key.toUpperCase());
+    im.referrerPolicy='no-referrer';
+    if(!opt.image && !opt.imageUrl && (key==='a'||key==='b')) im.className='original';
+    p.append(im);
+  }
+
+  const previousRenderRoundFix=render;
+  render=function(){
+    previousRenderRoundFix();
+    for(const k of OPTION_KEYS){
+      const opt=state?.[k],p=$('#picture-'+k);
+      if(!p||!opt)continue;
+      if(opt.visible===false)continue;
+      ensureOptionPictureNode(k,opt,p);
+    }
+  };
+
+  function switchFrameShapePreservingPlacement(scene,shape){
+    ensureSceneExtras(scene);
+    const nextShape=shape==='round'?'round':'square';
+    if(scene.frameShape===nextShape)return scene;
+    const placement=buildPlacementFromScene(scene);
+    scene.frameShape=nextShape;
+    applyScenePlacement(scene,placement);
+    scene.optionLayoutMode='manual';
+    return scene;
+  }
+
+  const frameShapeControlRepair=$('#frameShape');
+  if(frameShapeControlRepair)frameShapeControlRepair.onchange=e=>{
+    switchFrameShapePreservingPlacement(state,e.target.value);
+    markDirty(); render();
+    status('Moldura da cena: '+(state.frameShape==='round'?'redonda':'quadrada/cartão')+' · coordenadas preservadas.');
+  };
+  const applyFrameShapeButtonRepair=$('#applyFrameShape');
+  if(applyFrameShapeButtonRepair)applyFrameShapeButtonRepair.onclick=()=>{
+    const shape=$('#frameShape').value==='round'?'round':'square';
+    const count=affected().length;
+    applyToTargets(scene=>switchFrameShapePreservingPlacement(scene,shape));
+    status('Moldura aplicada a '+count+' cena(s) com coordenadas preservadas.');
   };
 
 
