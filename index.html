@@ -1031,6 +1031,7 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
       };
     });
     const preset=deepClone(LAYOUT_PRESETS[scene.format]);
+    const topPreset=LAYOUT_PRESETS[scene.format];
     const resetLayout=!scene.layout||scene.layoutFormat!==scene.format;
     const layout=resetLayout?preset:merge(preset, scene.layout||{});
     for(const box of [layout.title,...OPTION_KEYS.map(k=>layout.options[k])]){
@@ -1041,7 +1042,6 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
     layout.sceneBadge.x=clamp(layout.sceneBadge.x,-30,130,topPreset.sceneBadge.x);
     layout.sceneBadge.y=clamp(layout.sceneBadge.y,-30,130,topPreset.sceneBadge.y);
     layout.sceneBadge.size=clamp(layout.sceneBadge.size,2,45,topPreset.sceneBadge.size);
-    const topPreset=LAYOUT_PRESETS[scene.format];
     layout.title.y=Math.min(layout.title.y, topPreset.title.y);
     layout.title.x=layout.title.x<topPreset.title.x?layout.title.x:topPreset.title.x;
     layout.title.w=Math.max(layout.title.w, topPreset.title.w);
