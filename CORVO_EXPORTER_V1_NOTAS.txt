@@ -1,0 +1,41 @@
+CORVO STUDIO — EXPORTER V1
+Data: 2026-09-07
+
+IMPLEMENTADO
+- PNG da cena atual.
+- MP4 da cena atual.
+- MP4 do projeto inteiro.
+- 30 FPS.
+- H.264 via WebCodecs.
+- Bitrate alvo: 8 Mbps.
+- Keyframe a cada 4 s.
+- Fila do encoder limitada a 6 frames.
+- Progresso visual no painel Exportar.
+- 16:9 = 1920x1080.
+- 9:16 = 1080x1920.
+
+ORDEM DE PINTURA
+1. Fundo.
+2. PNGs depth=under.
+3. Cards A-D.
+4. PNGs depth=over.
+5. Título.
+6. Numeral da cena.
+
+O renderer usa o estado das cenas, sem gravar a tela do navegador.
+Ele respeita posição, escala, moldura quadrada/redonda, texto, cores,
+rotação/inclinação aproximada, efeitos suportados e animações atuais.
+
+LIMITES DESTA PRIMEIRA VERSÃO
+- Sem áudio no MP4 ainda.
+- Sem transições especiais entre cenas ainda.
+- Projeto inteiro exige que todas as cenas usem o mesmo formato.
+- O mp4-muxer é carregado sob demanda. O editor tenta primeiro ./mp4-muxer.js
+  e depois jsDelivr/unpkg. Se quiser operação totalmente offline, coloque
+  mp4-muxer.js ao lado do index.html.
+
+PRÓXIMA ETAPA RECOMENDADA
+- Áudio AAC.
+- armazenamento temporário para projetos longos.
+- recuperação resiliente de fundos animados.
+- diagnóstico de gargalo semelhante ao Forma.

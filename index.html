@@ -3145,6 +3145,272 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
   };
 
 
+  /* ===== EXPORTER V1 · Canvas + WebCodecs/H.264, inspired by Forma pipeline ===== */
+  const EXPORT_FPS=30, EXPORT_BITRATE=8_000_000, EXPORT_QUEUE_LIMIT=6;
+  let exportBusy=false;
+  const exportImageCache=new Map();
+
+  const exporterStyle=document.createElement('style');
+  exporterStyle.textContent=`
+    .corvo-export-panel{border-top:1px solid #343b49;margin-top:18px;padding-top:17px}
+    .corvo-export-panel h3{margin:0 0 6px;font-size:15px;color:#eaf2fb}
+    .corvo-export-panel .export-note{font-size:12px;color:#8698ad;line-height:1.45;margin:0 0 10px}
+    .corvo-export-grid{display:grid;grid-template-columns:1fr;gap:8px}
+    .corvo-export-grid button{width:100%;margin:0;background:#1d2937;border-color:#3a4a5e;text-align:left}
+    .corvo-export-grid button strong{display:block;font-size:13px}.corvo-export-grid button span{display:block;font-size:11px;color:#9fb0c2;margin-top:3px}
+    .corvo-export-grid button:disabled{opacity:.45;cursor:not-allowed}
+    .corvo-export-progress{height:8px;background:#0c1118;border:1px solid #2c3948;border-radius:999px;overflow:hidden;margin-top:11px}
+    .corvo-export-progress i{display:block;width:0;height:100%;background:#b8ff67;transition:width .15s linear}
+    #corvoExportMessage{display:block;min-height:17px;margin-top:7px;font-size:11px;color:#94a6b9;line-height:1.35}
+  `;
+  document.head.appendChild(exporterStyle);
+
+  const exportPanel=document.createElement('section');
+  exportPanel.className='corvo-export-panel';
+  exportPanel.innerHTML=`<h3>Exportar</h3><p class="export-note">Render determinístico em Canvas. MP4 usa H.264 / 30 FPS / 8 Mbps no Chrome ou Edge compatível.</p><div class="corvo-export-grid"><button id="corvoExportPng"><strong>PNG · cena atual</strong><span id="corvoPngInfo">1920 × 1080</span></button><button id="corvoExportSceneMp4"><strong>Cena atual · MP4 1080p · 30 FPS</strong><span id="corvoSceneMp4Info">8 s · H.264</span></button><button id="corvoExportProjectMp4"><strong>Projeto inteiro · MP4 1080p · 30 FPS</strong><span id="corvoProjectMp4Info">1 cena · 8 s</span></button></div><div class="corvo-export-progress"><i id="corvoExportBar"></i></div><small id="corvoExportMessage">Pronto para exportar.</small>`;
+  const exporterHost=document.querySelector('.panel');
+  if(exporterHost)exporterHost.appendChild(exportPanel);
+
+  function exportDimensions(format){return format==='9:16'?{w:1080,h:1920}:{w:1920,h:1080}}
+  function exportSetProgress(progress,message){
+    const bar=$('#corvoExportBar'),msg=$('#corvoExportMessage');
+    if(bar)bar.style.width=Math.max(0,Math.min(100,Number(progress)||0))+'%';
+    if(msg)msg.textContent=message||'';
+  }
+  function exportSetBusy(busy){
+    exportBusy=busy;
+    ['corvoExportPng','corvoExportSceneMp4','corvoExportProjectMp4'].forEach(id=>{const el=$('#'+id);if(el)el.disabled=busy});
+  }
+  function updateExporterUi(){
+    ensureSceneExtras(state);
+    const d=exportDimensions(state.format),total=scenes.reduce((s,c)=>s+(Number(c.duration)||8),0);
+    if($('#corvoPngInfo'))$('#corvoPngInfo').textContent=`${d.w} × ${d.h}`;
+    if($('#corvoSceneMp4Info'))$('#corvoSceneMp4Info').textContent=`${Number(state.duration)||8} s · H.264`;
+    if($('#corvoProjectMp4Info'))$('#corvoProjectMp4Info').textContent=`${scenes.length} cena${scenes.length===1?'':'s'} · ${Number(total.toFixed(1))} s`;
+  }
+  function updateExporterCompatibility(){
+    const mp4Ok=typeof VideoEncoder==='function'&&typeof VideoFrame==='function';
+    const sceneBtn=$('#corvoExportSceneMp4'),projectBtn=$('#corvoExportProjectMp4'),msg=$('#corvoExportMessage');
+    if(sceneBtn)sceneBtn.dataset.supported=mp4Ok?'1':'0';
+    if(projectBtn)projectBtn.dataset.supported=mp4Ok?'1':'0';
+    if(!mp4Ok&&msg)msg.textContent='PNG disponível. MP4 requer WebCodecs (Chrome/Edge atualizado).';
+    return mp4Ok;
+  }
+
+  function exportHexRgb(hex){
+    const m=String(hex||'').match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    return m?{r:parseInt(m[1],16),g:parseInt(m[2],16),b:parseInt(m[3],16)}:{r:255,g:255,b:255};
+  }
+  function exportRgba(hex,a=1){const c=exportHexRgb(hex);return `rgba(${c.r},${c.g},${c.b},${a})`}
+  function exportMix(hex,other='#ffffff',ratio=.5){
+    const a=exportHexRgb(hex),b=exportHexRgb(other),r=Math.max(0,Math.min(1,ratio));
+    const n=v=>Math.round(v).toString(16).padStart(2,'0');
+    return '#'+n(a.r*(1-r)+b.r*r)+n(a.g*(1-r)+b.g*r)+n(a.b*(1-r)+b.b*r);
+  }
+  function exportRoundedPath(ctx,x,y,w,h,r){
+    r=Math.max(0,Math.min(r,w/2,h/2));ctx.beginPath();
+    if(typeof ctx.roundRect==='function'){ctx.roundRect(x,y,w,h,r);return}
+    ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
+  }
+  function exportShapePath(ctx,x,y,w,h,round,r){
+    if(round){ctx.beginPath();ctx.ellipse(x+w/2,y+h/2,w/2,h/2,0,0,Math.PI*2)}else exportRoundedPath(ctx,x,y,w,h,r);
+  }
+  function loadExportImage(src){
+    if(!src)return Promise.resolve(null);
+    if(exportImageCache.has(src))return exportImageCache.get(src);
+    const promise=new Promise(resolve=>{
+      const img=new Image();
+      if(!String(src).startsWith('data:')&&!String(src).startsWith('blob:'))img.crossOrigin='anonymous';
+      img.onload=()=>resolve(img);img.onerror=()=>resolve(null);img.src=src;
+    });
+    exportImageCache.set(src,promise);return promise;
+  }
+  function exportDrawCover(ctx,img,x,y,w,h,scaleExtra=1){
+    if(!img)return;const nw=Math.max(1,img.naturalWidth||img.width),nh=Math.max(1,img.naturalHeight||img.height);
+    const scale=Math.max(w/nw,h/nh)*scaleExtra,dw=nw*scale,dh=nh*scale;
+    ctx.drawImage(img,x+(w-dw)/2,y+(h-dh)/2,dw,dh);
+  }
+  function exportDrawContain(ctx,img,x,y,w,h,scaleExtra=1){
+    if(!img)return;const nw=Math.max(1,img.naturalWidth||img.width),nh=Math.max(1,img.naturalHeight||img.height);
+    const scale=Math.min(w/nw,h/nh)*scaleExtra,dw=nw*scale,dh=nh*scale;
+    ctx.drawImage(img,x+(w-dw)/2,y+(h-dh)/2,dw,dh);
+  }
+  function exportWrapLines(ctx,text,maxWidth,maxLines=2){
+    const words=String(text||'').trim().split(/\s+/).filter(Boolean);if(!words.length)return [''];
+    const lines=[];let line='';
+    for(const word of words){const next=line?line+' '+word:word;if(ctx.measureText(next).width<=maxWidth||!line)line=next;else{lines.push(line);line=word;if(lines.length===maxLines-1)break}}
+    const consumed=lines.join(' ').split(/\s+/).filter(Boolean).length;
+    if(lines.length===maxLines-1){const rest=words.slice(consumed);if(rest.length)line=rest.join(' ')}
+    if(line)lines.push(line);
+    return lines.slice(0,maxLines);
+  }
+  function exportDrawTextFit(ctx,text,cx,cy,maxWidth,baseFont,color='#17282c',maxLines=2,weight=900){
+    let size=baseFont,lines=[];
+    for(let tries=0;tries<12;tries++){
+      ctx.font=`${weight} ${Math.max(10,size)}px Inter, Arial, sans-serif`;lines=exportWrapLines(ctx,text,maxWidth,maxLines);
+      if(lines.every(l=>ctx.measureText(l).width<=maxWidth)||size<=10)break;size*=.92;
+    }
+    ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=color;
+    const lh=size*1.04,total=(lines.length-1)*lh;
+    lines.forEach((line,i)=>ctx.fillText(line,cx,cy-total/2+i*lh,maxWidth));
+  }
+  function exportCardMotion(scene,key,time){
+    const idx=OPTION_KEYS.indexOf(key);let scale=1,dy=0;
+    if(scene.motion==='zoom-alternado'){
+      const period=5.2,phase=((time/period)+(idx%2)*.5)%1;
+      const pulse=Math.max(0,Math.sin(phase*Math.PI*2));scale=1+.038*pulse*pulse;
+    }else if(scene.motion==='pulso-suave'){
+      scale=1+.022*(.5+.5*Math.sin(time/4.6*Math.PI*2));
+    }else if(scene.motion==='normal')dy=-Math.max(0,Math.sin(time/5*Math.PI*2))*.007*exportDimensions(scene.format).w;
+    else if(scene.motion==='subtle')dy=-Math.max(0,Math.sin(time/5*Math.PI*2))*.003*exportDimensions(scene.format).w;
+    return {scale,dy};
+  }
+  function exportDrawEffectBehind(ctx,scene,opt,w,h,time,key,round){
+    if(scene.effects==='none')return;const color=opt.color||'#66c9ff';const idx=OPTION_KEYS.indexOf(key);
+    ctx.save();
+    if(scene.effects==='luz-alternada'){
+      const p=.35+.65*(.5+.5*Math.sin(time*2*Math.PI/5.2+idx*Math.PI));ctx.shadowColor=exportRgba(color,.9);ctx.shadowBlur=w*.09*p;ctx.strokeStyle=exportRgba(color,.18+.35*p);ctx.lineWidth=Math.max(4,w*.025);exportShapePath(ctx,-w*.035,-h*.035,w*1.07,h*1.07,round,w*.08);ctx.stroke();
+    }else if(scene.effects==='poder-oculto'){
+      const p=.65+.35*Math.sin(time*2*Math.PI/3.8+idx);for(let i=0;i<7;i++){const a=i/7*Math.PI*2+time*.35;const rx=w*(.54+.05*Math.sin(a*3));const ry=h*(.54+.08*Math.cos(a*2));ctx.strokeStyle=`rgba(163,87,255,${.08+.055*i})`;ctx.lineWidth=Math.max(3,w*.018);ctx.shadowColor='rgba(153,76,255,.75)';ctx.shadowBlur=w*.08*p;ctx.beginPath();ctx.arc(w/2+Math.cos(a)*w*.04,h/2+Math.sin(a)*h*.05,Math.min(rx,ry),a,a+Math.PI*.9);ctx.stroke()}
+    }else if(scene.effects==='poeira'){
+      for(let i=0;i<12;i++){const px=((i*37)%101)/100*w,py=h-( ((time*.16+i*.083)%1)*h*1.12 );const r=Math.max(2,w*(.004+(i%3)*.0015));ctx.fillStyle=i%3===0?exportRgba(color,.65):'rgba(255,246,220,.62)';ctx.shadowColor=ctx.fillStyle;ctx.shadowBlur=r*4;ctx.beginPath();ctx.arc(px,py,r,0,Math.PI*2);ctx.fill()}
+    }
+    ctx.restore();
+  }
+  async function exportDrawOverlay(ctx,slot,W,H){
+    if(!slot)return;const src=slot.image||slot.imageUrl||'';if(!src)return;const img=await loadExportImage(src);if(!img)return;
+    const width=W*(Number(slot.scale)||24)/100,nw=Math.max(1,img.naturalWidth||img.width),nh=Math.max(1,img.naturalHeight||img.height),height=width*nh/nw;
+    const cx=W*(Number(slot.x)||0)/100,base=H*(Number(slot.y)||0)/100;
+    ctx.save();ctx.globalAlpha=Math.max(0,Math.min(1,(Number(slot.opacity)||100)/100));ctx.shadowColor='rgba(0,0,0,.32)';ctx.shadowBlur=W*.008;ctx.drawImage(img,cx-width/2,base-height,width,height);ctx.restore();
+  }
+  async function exportDrawCard(ctx,scene,key,time,W,H){
+    const opt=scene[key],box=scene.layout?.options?.[key];if(!opt||opt.visible===false||!box)return;
+    let w=W*(Number(box.w)||20)/100,h=scene.frameShape==='round'?w:H*(Number(box.h)||40)/100;
+    let x=W*(Number(box.x)||0)/100,y=H*(Number(box.y)||0)/100;
+    const baseX=x+w/2,baseY=y+h;const motion=exportCardMotion(scene,key,time);const cardScale=(Number(opt.cardScale)||100)/100*motion.scale;
+    const sx=Math.max(.62,Math.cos((Number(opt.tiltY)||0)*Math.PI/180)),sy=Math.max(.62,Math.cos((Number(opt.tiltX)||0)*Math.PI/180));
+    ctx.save();ctx.translate(baseX,baseY+motion.dy);ctx.scale(cardScale*sx,cardScale*sy);ctx.translate(-w/2,-h);
+    const round=scene.frameShape==='round',radius=round?w/2:Math.min(w,h)*.075,color=opt.color||'#66c9ff';
+    exportDrawEffectBehind(ctx,scene,opt,w,h,time,key,round);
+    ctx.save();ctx.shadowColor=exportRgba(color,.6);ctx.shadowBlur=w*.065;exportShapePath(ctx,0,0,w,h,round,radius);
+    if(scene.skin==='white')ctx.fillStyle='#f9fbfd';else if(scene.skin==='glass')ctx.fillStyle='rgba(21,34,48,.78)';else if(scene.skin==='graphite')ctx.fillStyle='#171c24';else{const g=ctx.createRadialGradient(w*.5,h*.25,0,w*.5,h*.25,Math.max(w,h));g.addColorStop(0,exportRgba(exportMix(color,'#09131e',.55),.96));g.addColorStop(1,'rgba(4,11,18,.98)');ctx.fillStyle=g}
+    ctx.fill();ctx.shadowBlur=0;ctx.strokeStyle=color;ctx.lineWidth=Math.max(3,W*.0015);ctx.stroke();ctx.restore();
+
+    const picX=round?w*.08:w*.05,picY=round?h*.08:h*.08,picW=round?w*.84:w*.90,picH=round?h*.72:h*.76;
+    const imgSrc=opt.image||opt.imageUrl||'';const img=imgSrc?await loadExportImage(imgSrc):null;
+    ctx.save();exportShapePath(ctx,picX,picY,picW,picH,round,round?picW/2:Math.min(picW,picH)*.055);ctx.clip();
+    if(img){ctx.shadowColor='rgba(0,0,0,.35)';ctx.shadowBlur=w*.025;exportDrawContain(ctx,img,picX,picY,picW,picH,(Number(opt.size)||100)/100);ctx.shadowBlur=0}
+    ctx.restore();
+
+    if(scene.effects==='brilho-premium'){
+      const phase=((time/4.2)+(OPTION_KEYS.indexOf(key)*.21))%1,shineX=(-.55+phase*2.1)*w;ctx.save();exportShapePath(ctx,0,0,w,h,round,radius);ctx.clip();const grad=ctx.createLinearGradient(shineX-w*.2,0,shineX+w*.2,h);grad.addColorStop(0,'rgba(255,255,255,0)');grad.addColorStop(.5,'rgba(255,255,255,.48)');grad.addColorStop(1,'rgba(255,255,255,0)');ctx.fillStyle=grad;ctx.fillRect(shineX-w*.35,-h*.1,w*.7,h*1.2);ctx.restore();
+    }
+
+    const tabX=-w*(round?.05:.04),tabW=w*(round?1.10:1.08),tabH=h*(round?.20:.19),tabY=h-tabH;
+    const tabGrad=ctx.createLinearGradient(0,tabY,0,h);tabGrad.addColorStop(0,exportMix(color,'#ffffff',.16));tabGrad.addColorStop(.55,exportMix(color,'#101824',.22));tabGrad.addColorStop(1,exportMix(color,'#071018',.37));
+    ctx.save();ctx.shadowColor='rgba(0,0,0,.34)';ctx.shadowBlur=w*.04;exportRoundedPath(ctx,tabX,tabY,tabW,tabH,round?tabH/2:Math.min(tabH,w*.09));ctx.fillStyle=tabGrad;ctx.fill();ctx.shadowBlur=0;ctx.strokeStyle=exportMix(color,'#ffffff',.34);ctx.lineWidth=Math.max(2,W*.001);ctx.stroke();ctx.restore();
+    const textScale=(Number(scene.cardTextScale)||100)/100,baseFont=(scene.format==='9:16'?W*.0255:W*.0122)*textScale;
+    ctx.save();ctx.shadowColor='rgba(0,0,0,.55)';ctx.shadowBlur=baseFont*.16;exportDrawTextFit(ctx,opt.label||key.toUpperCase(),w/2,tabY+tabH*.56,tabW*.84,baseFont,'#ffffff',2,900);ctx.restore();
+
+    const br=scene.format==='9:16'?W*.027:W*.019,bcy=0;ctx.save();ctx.shadowColor=exportRgba(color,.72);ctx.shadowBlur=br*.65;ctx.beginPath();ctx.arc(w/2,bcy,br,0,Math.PI*2);ctx.fillStyle='#0c2633';ctx.fill();ctx.shadowBlur=0;ctx.strokeStyle=color;ctx.lineWidth=Math.max(3,W*.0015);ctx.stroke();ctx.font=`900 ${br*1.15}px Inter, Arial, sans-serif`;ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(key.toUpperCase(),w/2,bcy+br*.05);ctx.restore();
+    ctx.restore();
+  }
+  async function paintCorvoExportFrame(canvas,scene,time,sceneIndex=0){
+    ensureSceneExtras(scene);const {w:W,h:H}=exportDimensions(scene.format);canvas.width=W;canvas.height=H;const ctx=canvas.getContext('2d',{alpha:false});
+    ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.fillStyle='#0a1412';ctx.fillRect(0,0,W,H);
+    const bgSrc=scene.background||scene.backgroundUrl||defaultBackground,bg=await loadExportImage(bgSrc);
+    if(bg){const breathe=scene.motion==='still'?1:1+.025*(.5-.5*Math.cos((time%18)/18*Math.PI*2));exportDrawCover(ctx,bg,0,0,W,H,breathe)}
+    const shade=ctx.createLinearGradient(0,0,0,H);shade.addColorStop(0,'rgba(4,13,12,.30)');shade.addColorStop(.34,'rgba(0,0,0,0)');shade.addColorStop(.72,'rgba(0,0,0,0)');shade.addColorStop(1,'rgba(3,10,14,.28)');ctx.fillStyle=shade;ctx.fillRect(0,0,W,H);
+    for(const slot of scene.overlays||[])if(slot?.depth!=='over')await exportDrawOverlay(ctx,slot,W,H);
+    for(const key of OPTION_KEYS)await exportDrawCard(ctx,scene,key,time,W,H);
+    for(const slot of scene.overlays||[])if(slot?.depth==='over')await exportDrawOverlay(ctx,slot,W,H);
+
+    const title=scene.layout.title,tx=W*title.x/100,ty=H*title.y/100,tw=W*title.w/100,th=H*title.h/100;
+    ctx.save();ctx.shadowColor='rgba(0,0,0,.16)';ctx.shadowBlur=W*.012;exportRoundedPath(ctx,tx,ty,tw,th,Math.min(th*.12,W*.01));ctx.fillStyle=scene.titleColor||'#fffdf4';ctx.fill();ctx.shadowBlur=0;ctx.restore();
+    const titleScale=(Number(scene.titleTextScale)||100)/100,titleFont=(scene.format==='9:16'?W*.0515:W*.027)*titleScale;
+    exportDrawTextFit(ctx,scene.title||'',tx+tw/2,ty+th/2,tw*(scene.format==='9:16'?.72:.86),titleFont,'#17282c',2,900);
+
+    const badge=scene.layout.sceneBadge,bsize=W*(Number(badge.size)||5.5)/100,bx=W*(Number(badge.x)||0)/100,by=H*(Number(badge.y)||0)/100;
+    ctx.save();ctx.shadowColor='rgba(184,255,103,.60)';ctx.shadowBlur=bsize*.25;exportRoundedPath(ctx,bx,by,bsize,bsize,bsize*.22);const bgd=ctx.createLinearGradient(0,by,0,by+bsize);bgd.addColorStop(0,'#c9ff85');bgd.addColorStop(1,'#91ee3b');ctx.fillStyle=bgd;ctx.fill();ctx.shadowBlur=0;ctx.strokeStyle='rgba(255,255,255,.72)';ctx.lineWidth=Math.max(2,W*.001);ctx.stroke();ctx.fillStyle='#102008';ctx.font=`900 ${bsize*(scene.format==='9:16'?.43:.46)}px Inter, Arial, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(scene.sceneNumber||String(sceneIndex+1),bx+bsize/2,by+bsize/2);ctx.restore();
+    return canvas;
+  }
+  async function prewarmExportAssets(sceneList){
+    const sources=new Set([defaultBackground]);
+    for(const scene of sceneList){ensureSceneExtras(scene);if(scene.background)sources.add(scene.background);if(scene.backgroundUrl)sources.add(scene.backgroundUrl);for(const k of OPTION_KEYS){if(scene[k]?.image)sources.add(scene[k].image);if(scene[k]?.imageUrl)sources.add(scene[k].imageUrl)}for(const slot of scene.overlays||[]){if(slot?.image)sources.add(slot.image);if(slot?.imageUrl)sources.add(slot.imageUrl)}}
+    await Promise.all([...sources].map(loadExportImage));
+  }
+  function downloadExportBlob(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000)}
+  async function exportCurrentScenePng(){
+    if(exportBusy)return;exportSetBusy(true);try{exportSetProgress(8,'Preparando imagens…');await prewarmExportAssets([state]);const canvas=document.createElement('canvas');await paintCorvoExportFrame(canvas,state,0,activeScene);exportSetProgress(78,'Gerando PNG…');const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(Error('Falha ao gerar PNG.')),'image/png'));const d=exportDimensions(state.format);downloadExportBlob(blob,`corvo-cena-${String(activeScene+1).padStart(2,'0')}-${d.w}x${d.h}.png`);exportSetProgress(100,'PNG pronto.');status('PNG da cena exportado em '+d.w+'×'+d.h+'.')}catch(err){console.error('CORVO_PNG_EXPORT',err);exportSetProgress(0,err?.message||'Falha ao exportar PNG.');status(err?.message||'Falha ao exportar PNG.')}finally{exportSetBusy(false)}}
+  async function ensureCorvoMuxer(){
+    if(window.Mp4Muxer)return window.Mp4Muxer;
+    if(window.__corvoMuxerPromise)return window.__corvoMuxerPromise;
+    const sources=[
+      './mp4-muxer.js',
+      'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js',
+      'https://unpkg.com/mp4-muxer@5.2.2/build/mp4-muxer.js'
+    ];
+    window.__corvoMuxerPromise=(async()=>{
+      for(const src of sources){
+        try{
+          await new Promise((resolve,reject)=>{
+            const s=document.createElement('script');s.src=src;s.async=true;
+            s.onload=()=>window.Mp4Muxer?resolve():reject(Error('módulo sem global Mp4Muxer'));
+            s.onerror=()=>reject(Error('falha ao carregar '+src));
+            document.head.appendChild(s);
+          });
+          if(window.Mp4Muxer)return window.Mp4Muxer;
+        }catch(err){console.warn('CORVO_MUXER_SOURCE_FAIL',src,err)}
+      }
+      throw Error('Não foi possível carregar o módulo MP4. Verifique a conexão com a internet ou inclua mp4-muxer.js ao lado do index.html.');
+    })();
+    try{return await window.__corvoMuxerPromise}catch(err){window.__corvoMuxerPromise=null;throw err}
+  }
+  async function resolveCorvoH264(width,height){
+    if(typeof VideoEncoder!=='function'||typeof VideoFrame!=='function')throw Error('Este navegador não oferece WebCodecs. Use Chrome ou Edge atualizado.');
+    const codecs=['avc1.420028','avc1.42e028','avc1.42002a','avc1.42e02a','avc1.4d4028','avc1.4d402a','avc1.640028','avc1.64002a'];
+    const hardware=['prefer-hardware','no-preference','prefer-software'];
+    for(const hardwareAcceleration of hardware)for(const codec of codecs){const config={codec,width,height,bitrate:EXPORT_BITRATE,framerate:EXPORT_FPS,latencyMode:'quality',hardwareAcceleration,contentHint:'motion'};try{const ok=await VideoEncoder.isConfigSupported(config);if(ok.supported)return config}catch{}}
+    throw Error('Nenhum encoder H.264 compatível foi encontrado para este formato.');
+  }
+  async function waitCorvoEncoder(encoder,failure){
+    const started=performance.now();while(encoder.encodeQueueSize>EXPORT_QUEUE_LIMIT){if(failure())throw failure();if(performance.now()-started>20000)throw Error('O encoder H.264 parou de responder.');await new Promise(resolve=>setTimeout(resolve,0))}
+  }
+  function projectSceneAtTime(list,time){let cursor=0;for(let i=0;i<list.length;i++){const dur=Number(list[i].duration)||8;if(time<cursor+dur||i===list.length-1)return {scene:list[i],index:i,localTime:Math.max(0,Math.min(dur,time-cursor))};cursor+=dur}return {scene:list[0],index:0,localTime:0}}
+  async function renderCorvoMp4(sceneList,{project=false}={}){
+    if(!sceneList.length)throw Error('Não há cenas para exportar.');sceneList.forEach(ensureSceneExtras);
+    const format=sceneList[0].format;if(sceneList.some(s=>s.format!==format))throw Error('O projeto possui cenas 16:9 e 9:16 misturadas. Exporte cada formato separadamente.');
+    const {w:width,h:height}=exportDimensions(format),duration=project?sceneList.reduce((s,c)=>s+(Number(c.duration)||8),0):(Number(sceneList[0].duration)||8);
+    exportSetProgress(1,'Carregando módulo MP4…');const M=await ensureCorvoMuxer();exportSetProgress(3,'Preparando imagens…');await prewarmExportAssets(sceneList);exportSetProgress(5,'Selecionando encoder H.264…');const config=await resolveCorvoH264(width,height);
+    const target=new M.ArrayBufferTarget();const muxer=new M.Muxer({target,video:{codec:'avc',width,height,frameRate:EXPORT_FPS},fastStart:'in-memory'});
+    let failure=null;const encoder=new VideoEncoder({output:(chunk,meta)=>{try{muxer.addVideoChunk(chunk,meta)}catch(e){failure=e instanceof Error?e:Error('Falha ao gravar MP4.')}},error:e=>{failure=e}});encoder.configure(config);
+    const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const frameCount=Math.max(1,Math.round(duration*EXPORT_FPS)),frameDuration=Math.round(1_000_000/EXPORT_FPS);
+    try{
+      for(let frame=0;frame<frameCount;frame++){
+        if(failure)throw failure;const time=frame/EXPORT_FPS;let sceneInfo;
+        if(project)sceneInfo=projectSceneAtTime(sceneList,time);else sceneInfo={scene:sceneList[0],index:activeScene,localTime:time};
+        await paintCorvoExportFrame(canvas,sceneInfo.scene,sceneInfo.localTime,sceneInfo.index);
+        const vf=new VideoFrame(canvas,{timestamp:Math.round(frame*1_000_000/EXPORT_FPS),duration:frameDuration});try{encoder.encode(vf,{keyFrame:frame%(EXPORT_FPS*4)===0})}finally{vf.close()}
+        await waitCorvoEncoder(encoder,()=>failure);
+        if(frame%15===0||frame===frameCount-1){const pct=6+Math.round(frame/Math.max(1,frameCount-1)*91);const sceneMsg=project?` · cena ${sceneInfo.index+1}/${sceneList.length}`:'';exportSetProgress(pct,`Renderizando MP4${sceneMsg} · ${pct}%`);await new Promise(resolve=>setTimeout(resolve,0))}
+      }
+      exportSetProgress(98,'Finalizando H.264…');await encoder.flush();if(failure)throw failure;muxer.finalize();const blob=new Blob([target.buffer],{type:'video/mp4'});exportSetProgress(100,'MP4 pronto.');return {blob,duration,width,height};
+    }finally{if(encoder.state!=='closed')encoder.close()}
+  }
+  async function exportSceneMp4(){
+    if(exportBusy)return;exportSetBusy(true);try{const r=await renderCorvoMp4([deepClone(state)],{project:false});downloadExportBlob(r.blob,`corvo-cena-${String(activeScene+1).padStart(2,'0')}-${r.width}x${r.height}-30fps.mp4`);status('MP4 da cena exportado · '+r.width+'×'+r.height+' · 30 FPS.')}catch(err){console.error('CORVO_SCENE_MP4',err);exportSetProgress(0,err?.message||'Falha ao exportar MP4.');status(err?.message||'Falha ao exportar MP4.')}finally{exportSetBusy(false)}}
+  async function exportProjectMp4(){
+    if(exportBusy)return;exportSetBusy(true);try{const list=scenes.map(s=>deepClone(s));const r=await renderCorvoMp4(list,{project:true});downloadExportBlob(r.blob,`corvo-projeto-${list.length}-cenas-${r.width}x${r.height}-30fps.mp4`);status('MP4 do projeto inteiro exportado · '+list.length+' cenas · 30 FPS.')}catch(err){console.error('CORVO_PROJECT_MP4',err);exportSetProgress(0,err?.message||'Falha ao exportar projeto.');status(err?.message||'Falha ao exportar projeto.')}finally{exportSetBusy(false)}}
+
+  $('#corvoExportPng').onclick=exportCurrentScenePng;
+  $('#corvoExportSceneMp4').onclick=()=>{if(!updateExporterCompatibility()){status('MP4 requer WebCodecs. Use Chrome ou Edge atualizado.');return}return exportSceneMp4()};
+  $('#corvoExportProjectMp4').onclick=()=>{if(!updateExporterCompatibility()){status('MP4 requer WebCodecs. Use Chrome ou Edge atualizado.');return}return exportProjectMp4()};
+  const renderBeforeExporterV1=render;
+  render=function(){renderBeforeExporterV1();updateExporterUi();updateExporterCompatibility()};
+  window.CorvoExporter={version:'1.0.1',paintFrame:paintCorvoExportFrame,exportPng:exportCurrentScenePng,exportSceneMp4,exportProjectMp4,renderMp4:renderCorvoMp4,compatibility:updateExporterCompatibility};
+  updateExporterUi();updateExporterCompatibility();
+
+
   render();
 })();
 </script></body></html>
