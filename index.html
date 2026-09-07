@@ -569,13 +569,13 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
 
   const LAYOUT_PRESETS={
     '16:9':{
-      title:{x:1.5,y:4.5,w:97,h:13},
-      sceneBadge:{x:2.1,y:5.0,size:5.5},
+      title:{x:0,y:0,w:100,h:13},
+      sceneBadge:{x:1.8,y:0,size:6.6},
       options:{a:{x:24,y:27,w:20,h:46},b:{x:56,y:27,w:20,h:46}}
     },
     '9:16':{
-      title:{x:5,y:4.4,w:90,h:13.5},
-      sceneBadge:{x:6.5,y:5.0,size:11},
+      title:{x:0,y:0,w:100,h:13.5},
+      sceneBadge:{x:1.8,y:0,size:15},
       options:{a:{x:12,y:28,w:34,h:21},b:{x:54,y:28,w:34,h:21}}
     }
   };
@@ -612,6 +612,11 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
       if('h' in box) box.h=clamp(box.h,5,100,20);
       if('size' in box) box.size=clamp(box.size,2,30,8);
     }
+    const topPreset=LAYOUT_PRESETS[scene.format];
+    layout.title.y=Math.min(layout.title.y, topPreset.title.y);
+    layout.sceneBadge.y=Math.min(layout.sceneBadge.y, topPreset.sceneBadge.y);
+    layout.title.x=layout.title.x<topPreset.title.x?layout.title.x:topPreset.title.x;
+    layout.title.w=Math.max(layout.title.w, topPreset.title.w);
     scene.layout=layout;
     scene.layoutFormat=scene.format;
     return scene;
