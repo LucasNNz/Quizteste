@@ -62,59 +62,47 @@ $('#titleColor').oninput=e=>{state.titleColor=e.target.value;markDirty();render(
 render();
 
 function coordinateReport(){
- const scene=$('#scene'),sr=scene.getBoundingClientRect(),width=scene.clientWidth,height=scene.clientHeight;
- if(!width||!height)throw Error('A prévia precisa estar visível para medir as coordenadas.');
- const sx=1920/width,sy=1080/height,originX=sr.left+scene.clientLeft,originY=sr.top+scene.clientTop;
- const n=v=>Number(v.toFixed(2));
- const bounds=el=>{const r=el.getBoundingClientRect();return{x:r.left-originX,y:r.top-originY,w:r.width,h:r.height}};
- const scaled=b=>({x:b.x*sx,y:b.y*sy,w:b.w*sx,h:b.h*sy});
- const boxText=b=>`X=${n(b.x)}; Y=${n(b.y)}; largura=${n(b.w)}; altura=${n(b.h)}; direita=${n(b.x+b.w)}; base=${n(b.y+b.h)}; centro=(${n(b.x+b.w/2)}, ${n(b.y+b.h/2)})`;
- const union=boxes=>{const x=Math.min(...boxes.map(b=>b.x)),y=Math.min(...boxes.map(b=>b.y));return{x,y,w:Math.max(...boxes.map(b=>b.x+b.w))-x,h:Math.max(...boxes.map(b=>b.y+b.h))-y}};
- const lines=['CORVO STUDIO — GUIA DE ENQUADRAMENTO',`Cena ${activeScene+1} de ${scenes.length}`,`Pergunta: ${state.title}`,`Gerado em: ${new Date().toISOString()}`,'',
- 'REFERENCIAL','Tela de criação: 1920 × 1080 px (16:9).','Origem (0,0): canto superior esquerdo interno da cena. X cresce para a direita; Y cresce para baixo.','As coordenadas excluem o editor e a borda externa da prévia.',`Prévia interna medida agora: ${width} × ${height} px. Escala para Full HD: X × ${n(sx)}; Y × ${n(sy)}.`,
- 'Os retângulos incluem a borda do cartão. Brilho/sombra difusa e partículas não entram nos limites geométricos.',
- 'As posições de repouso não incluem o deslocamento da animação. Os limites do ciclo são medidos nos extremos dos keyframes reais do navegador.',
- `Movimento escolhido: ${state.motion}; pausa do editor: ${paused?'sim':'não'}; preferência do sistema por movimento reduzido: ${matchMedia('(prefers-reduced-motion: reduce)').matches?'sim':'não'}.`,''];
- const summary=[];
+ const scene=$('#scene'),sr=scene.getBoundingClientRect(),w=scene.clientWidth,h=scene.clientHeight;
+ if(!w||!h)throw Error('A prévia precisa estar visível para medir as coordenadas.');
+ const sx=1920/w,sy=1080/h,ox=sr.left+scene.clientLeft,oy=sr.top+scene.clientTop;
+ const rect=el=>{const r=el.getBoundingClientRect();return{x:(r.left-ox)*sx,y:(r.top-oy)*sy,w:r.width*sx,h:r.height*sy}};
+ const union=bs=>{const x=Math.min(...bs.map(b=>b.x)),y=Math.min(...bs.map(b=>b.y));return{x,y,w:Math.max(...bs.map(b=>b.x+b.w))-x,h:Math.max(...bs.map(b=>b.y+b.h))-y}};
+ const range=b=>`X ${Math.floor(b.x)}–${Math.ceil(b.x+b.w)} / Y ${Math.floor(b.y)}–${Math.ceil(b.y+b.h)} px`;
+ const expand=(b,m)=>{const x=Math.max(0,b.x-m),y=Math.max(0,b.y-m);return{x,y,w:Math.min(1920,b.x+b.w+m)-x,h:Math.min(1080,b.y+b.h+m)-y}};
+ // CSS blur has a soft falloff, so this is an estimate, not a hard geometric edge.
+ function shadowMargin(el,pseudo){const style=getComputedStyle(el,pseudo);const clean=style.boxShadow.replace(/(?:rgba?|hsla?|color)\([^)]*\)/g,'');let max=0;for(const sh of clean.split(',')){const values=(sh.match(/-?[\d.]+px/g)||[]).map(parseFloat);if(values.length>=2&&!sh.includes('inset'))max=Math.max(max,Math.max(Math.abs(values[0]),Math.abs(values[1]))+1.5*(values[2]||0)+(values[3]||0))}return Math.ceil(max*Math.max(sx,sy))}
+ const title=$('#sceneTitle'),titleBox=rect(title),titleMargin=shadowMargin(title);
+ const lines=['MAPA DE OCLUSÃO + APARÊNCIA DOS ELEMENTOS SOBREPOSTOS','',
+ 'TELA: 1920 × 1080 px (16:9).',
+ 'Preenchimento: cover — preenche a tela com corte central quando a proporção do fundo é diferente de 16:9.',
+ 'Coordenadas: origem no canto superior esquerdo; X cresce para a direita e Y para baixo. Limites arredondados para fora.',
+ '', 'TÍTULO — ÁREA BLOQUEADA',range(titleBox),`Margem estimada de sombra: ${titleMargin} px. Zona de exclusão com margem: ${range(expand(titleBox,titleMargin))}.`,
+ `Aparência: faixa horizontal, cantos arredondados, fundo ${state.titleColor||'#fffdf4'}; texto sobreposto pelo editor.`, ''];
  for(const k of ['a','b']){
-  const card=$('.card.'+k),badge=card.querySelector('.badge'),picture=card.querySelector('.picture');
-  const now=bounds(card),insideNow=bounds(picture);
-  const transform=getComputedStyle(card).transform;const matrix=new DOMMatrixReadOnly(transform==='none'?undefined:transform);
-  const base={x:now.x-matrix.m41,y:now.y-matrix.m42,w:now.w,h:now.h};
-  const movement=card.getAnimations().find(a=>a.effect?.target===card&&['float','floatSmall'].includes(a.animationName));
-  const samples=[],badges=[];let duration=0,delay=0,keyframes=[],play='nenhuma';
-  if(movement){
-   const oldTime=movement.currentTime,oldState=movement.playState;
-   const timing=movement.effect.getTiming();duration=Number(timing.duration)||0;delay=timing.delay||0;play=oldState;
-   keyframes=movement.effect.getKeyframes();
-   try{movement.pause();const offsets=[...new Set([0,.5,...keyframes.map(f=>f.computedOffset??f.offset??0)])].filter(v=>v>=0&&v<1);
-    for(const offset of offsets){movement.currentTime=delay+duration*offset;samples.push(bounds(card));badges.push(bounds(badge));}
-   }finally{movement.currentTime=oldTime;if(oldState==='running')movement.play();}
-  }else{samples.push(now);badges.push(bounds(badge));}
-  const all=union(samples),envelope=union([...samples,...badges]),full=scaled(base);
-  const minDy=Math.min(...samples.map(b=>b.y-base.y))*sy,maxDy=Math.max(...samples.map(b=>b.y-base.y))*sy;
-  // Scale the observed transform displacement out of the inner-image coordinates.
-  const imageBase={...insideNow,x:insideNow.x-(now.x-base.x),y:insideNow.y-(now.y-base.y)};
-  lines.push(`OPÇÃO ${k.toUpperCase()} — ${state[k].label||'sem nome'}`,
-   'Repouso em Full HD: '+boxText(full),
-   `Repouso em porcentagem: X=${n(base.x/width*100)}%; Y=${n(base.y/height*100)}%; largura=${n(base.w/width*100)}%; altura=${n(base.h/height*100)}%.`,
-   'Área interna da imagem em Full HD: '+boxText(scaled(imageBase)),
-   'Posição instantânea em Full HD: '+boxText(scaled(now)),
-   'Repouso na prévia, em px: '+boxText(base),
-   `Animação efetiva: ${movement?movement.animationName:'desligada'}; estado: ${play}; ciclo=${n(duration/1000)} s; atraso de fase=${n(delay/1000)} s.`,
-   `Deslocamento vertical relativo ao repouso: mínimo=${n(minDy)} px; máximo=${n(maxDy)} px; percurso entre extremos=${n(maxDy-minDy)} px.`,
-   `Subida máxima acima do repouso: ${n(Math.max(0,-minDy))} px. Descida máxima abaixo do repouso: ${n(Math.max(0,maxDy))} px.`,
-   'Área ocupada pelo cartão durante todo o ciclo: '+boxText(scaled(all)),
-   'Área ocupada pelo cartão + círculo A/B durante todo o ciclo: '+boxText(scaled(envelope)),
-   `Keyframes do movimento: ${keyframes.length?keyframes.map(f=>`${n((f.computedOffset??f.offset??0)*100)}%: ${f.transform||'none'}`).join(' | '):'sem animação ativa no navegador'}.`,'');
-  const e=scaled(envelope);summary.push(`${k.toUpperCase()}: reservar de X=${n(e.x)} até ${n(e.x+e.w)}, e de Y=${n(e.y)} até ${n(e.y+e.h)}.`);
+  const card=$('.card.'+k),badge=card.querySelector('.badge'),style=getComputedStyle(card),current=rect(card);
+  const animation=card.getAnimations().find(a=>a.effect?.target===card&&['float','floatSmall'].includes(a.animationName));
+  const samples=[];
+  if(animation){const time=animation.currentTime,play=animation.playState,t=animation.effect.getTiming();try{animation.pause();for(const offset of [0,.5]){animation.currentTime=(t.delay||0)+Number(t.duration)*offset;samples.push(rect(card),rect(badge))}}finally{animation.currentTime=time;if(play==='running')animation.play()}}
+  else samples.push(current,rect(badge));
+  const blocked=union(samples),margin=Math.max(shadowMargin(card),shadowMargin(card,'::after'),shadowMargin(badge));
+  const radius=Math.round(parseFloat(style.borderTopLeftRadius)*sx);
+  lines.push(`CARTÃO ${k.toUpperCase()} — ÁREA BLOQUEADA TOTAL (cartão + selo + animação)`,range(blocked),
+   `Margem estimada de glow/sombra: ${margin} px para fora. Zona de exclusão com margem: ${range(expand(blocked,margin))}.`,
+   `Aparência: orientação ${current.h>=current.w?'vertical':'horizontal'}; tamanho ${Math.round(current.w)} × ${Math.round(current.h)} px; cantos arredondados (raio aproximado ${radius} px).`,
+   `Fundo: gradiente escuro ${k==='a'?'azul-petróleo':'marrom-avermelhado'}, parcialmente translúcido. A área inteira do cartão deve ser tratada como bloqueada para a composição.`,
+   `Borda/glow: luminoso, cor ${state[k].color}. Selo ${k.toUpperCase()}: círculo opaco centralizado no topo, projetado acima do cartão.`,
+   'Imagem e nome da opção são sobrepostos dentro do cartão pelo editor.','');
  }
- lines.push('FAIXA DO TÍTULO — FULL HD',boxText(scaled(bounds($('#sceneTitle')))),'',
- 'RESUMO PARA CRIAR O CENÁRIO','Crie a imagem de fundo em 1920 × 1080. Não desenhe cartões, letras A/B nem o título no fundo: eles são adicionados pelo editor.',...summary,
- 'Deixe os elementos importantes do cenário fora dessas áreas. Para acomodar também o halo de luz, acrescente uma margem artística ao redor; o brilho não tem uma borda física única.',
- 'A imagem de fundo preenche a cena com corte central (cover). Imagens fora de 16:9 podem ser cortadas. O movimento do fundo é independente dos cartões.',
- 'Se mudar o layout ou o modo de animação, exporte este guia novamente. Se a animação estiver desligada ou bloqueada por movimento reduzido, o relatório mostrará deslocamento zero.');
+ lines.push('MARGENS DE EFEITO','As margens são estimativas conservadoras do alcance visual de glow/sombra, calculadas a partir dos efeitos do editor; a dissipação não possui um limite rígido.',
+ '', 'REGRA DE COMPOSIÇÃO',
+ 'Somente título, cartões, selos, deslocamento da animação e margens de efeito são zonas de exclusão.',
+ 'TODO O RESTANTE DA IMAGEM É LIVRE PARA COMPOSIÇÃO.',
+ 'Fora dessas zonas, o cenário pode conter qualquer elemento necessário para compor a intenção da cena. Não é necessária uma grande região neutra atrás ou ao redor dos cartões.',
+ 'Elementos do cenário podem tocar, enquadrar, sustentar ou conduzir visualmente aos cartões, respeitando os limites das zonas de exclusão com margem.',
+ '', 'REGRA DE INTEGRAÇÃO',
+ 'O cenário deve ser composto para conduzir visualmente aos cartões, sem desenhar os cartões, selos ou faixa de título no fundo.',
+ 'Este mapa corresponde ao layout e à animação efetiva atuais; se o movimento estiver desligado, seus limites serão os limites estáticos.');
  return lines.join('\n');
 }
-$('#exportCoordinates').onclick=()=>{try{const txt=coordinateReport();const url=URL.createObjectURL(new Blob([txt],{type:'text/plain;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='coordenadas-cena-'+String(activeScene+1).padStart(3,'0')+'.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('TXT exportado com coordenadas reais, limites da animação e área dos marcadores.')}catch(e){status(e.message)}};
+$('#exportCoordinates').onclick=()=>{try{const txt=coordinateReport();const url=URL.createObjectURL(new Blob([txt],{type:'text/plain;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='coordenadas-cena-'+String(activeScene+1).padStart(3,'0')+'.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('Mapa de oclusão exportado com áreas bloqueadas, aparência e margens de efeito.')}catch(e){status(e.message)}};
 </script></body></html>
