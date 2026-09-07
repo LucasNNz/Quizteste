@@ -2817,6 +2817,207 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
   };
 
 
+  /* ===== Independent title text + scene badge block/digit scale ===== */
+  const TITLE_TEXT_SCALE_MIN=55,TITLE_TEXT_SCALE_MAX=190;
+  const BADGE_DIGIT_SCALE_MIN=55,BADGE_DIGIT_SCALE_MAX=220;
+
+  const ensureBeforeTitleBadgeScale=ensureSceneExtras;
+  ensureSceneExtras=function(scene){
+    scene=ensureBeforeTitleBadgeScale(scene);
+    if(!scene||typeof scene!=='object')return scene;
+    scene.titleTextScale=clamp(scene.titleTextScale,TITLE_TEXT_SCALE_MIN,TITLE_TEXT_SCALE_MAX,100);
+    if(scene.layout?.sceneBadge){
+      scene.layout.sceneBadge.digitScale=clamp(scene.layout.sceneBadge.digitScale,BADGE_DIGIT_SCALE_MIN,BADGE_DIGIT_SCALE_MAX,100);
+    }
+    return scene;
+  };
+  scenes.forEach(ensureSceneExtras);ensureSceneExtras(state);
+
+  const titleBadgeUiStyle=document.createElement('style');
+  titleBadgeUiStyle.textContent=`
+    .scene-title-scale-controls{margin:8px 0 12px;padding:10px 0;border-bottom:1px dashed #334052}
+    .scene-title-scale-controls .badge-readout{display:block;color:#91a4bb;font-size:12px;margin-top:4px}
+  `;
+  document.head.appendChild(titleBadgeUiStyle);
+
+  const existingBadgeWrap=document.querySelector('.scene-badge-controls');
+  if(existingBadgeWrap){
+    const heading=existingBadgeWrap.querySelector('.option-head');
+    if(heading?.querySelector('b'))heading.querySelector('b').textContent='Título e número da cena';
+    const titleScaleBox=document.createElement('div');
+    titleScaleBox.className='scene-title-scale-controls';
+    titleScaleBox.innerHTML=`<label class="field"><span>Escala da letra do título</span><input id="sceneTitleTextScale" type="range" min="${TITLE_TEXT_SCALE_MIN}" max="${TITLE_TEXT_SCALE_MAX}" step="1"><small class="badge-readout" id="sceneTitleTextScaleValue"></small></label>`;
+    const grid=existingBadgeWrap.querySelector('.badge-grid');
+    if(grid)existingBadgeWrap.insertBefore(titleScaleBox,grid);else existingBadgeWrap.prepend(titleScaleBox);
+    const badgeScaleInput=$('#sceneBadgeScale');
+    if(badgeScaleInput){
+      const label=badgeScaleInput.closest('.field');
+      const span=label?.querySelector(':scope > span');if(span)span.textContent='Escala do quadrado verde';
+      label?.insertAdjacentHTML('afterend',`<label class="field"><span>Escala do numeral</span><input id="sceneBadgeDigitScale" type="range" min="${BADGE_DIGIT_SCALE_MIN}" max="${BADGE_DIGIT_SCALE_MAX}" step="1"><small class="badge-readout" id="sceneBadgeDigitScaleValue"></small></label>`);
+    }
+    const note=existingBadgeWrap.querySelector('.skin-note');
+    if(note)note.textContent='O quadrado verde continua arrastável no canvas. Tamanho do bloco e tamanho do numeral são independentes.';
+  }
+
+  function syncTitleBadgeScaleControls(scene=state){
+    ensureSceneExtras(scene);
+    const b=scene.layout.sceneBadge;
+    const ts=$('#sceneTitleTextScale'),ds=$('#sceneBadgeDigitScale');
+    if(ts)ts.value=String(Math.round(Number(scene.titleTextScale)||100));
+    if(ds)ds.value=String(Math.round(Number(b.digitScale)||100));
+    if($('#sceneTitleTextScaleValue'))$('#sceneTitleTextScaleValue').textContent=`${Math.round(Number(scene.titleTextScale)||100)}%`;
+    if($('#sceneBadgeDigitScaleValue'))$('#sceneBadgeDigitScaleValue').textContent=`${Math.round(Number(b.digitScale)||100)}%`;
+  }
+  function updateTitleBadgeScaleFromControls(){
+    ensureSceneExtras(state);
+    if($('#sceneTitleTextScale'))state.titleTextScale=clamp($('#sceneTitleTextScale').value,TITLE_TEXT_SCALE_MIN,TITLE_TEXT_SCALE_MAX,state.titleTextScale);
+    if($('#sceneBadgeDigitScale'))state.layout.sceneBadge.digitScale=clamp($('#sceneBadgeDigitScale').value,BADGE_DIGIT_SCALE_MIN,BADGE_DIGIT_SCALE_MAX,state.layout.sceneBadge.digitScale);
+    markDirty();render();
+  }
+  $('#sceneTitleTextScale')?.addEventListener('input',updateTitleBadgeScaleFromControls);
+  $('#sceneBadgeDigitScale')?.addEventListener('input',updateTitleBadgeScaleFromControls);
+
+  const oldApplySceneBadgeScope=$('#applySceneBadgeScope')?.onclick;
+  if($('#applySceneBadgeScope'))$('#applySceneBadgeScope').onclick=()=>{
+    ensureSceneExtras(state);
+    const srcBadge=deepClone(state.layout.sceneBadge),srcTitleScale=state.titleTextScale,list=affected();
+    if(!list.length){status('Marque pelo menos uma cena.');return}
+    list.forEach(scene=>{ensureSceneExtras(scene);scene.layout.sceneBadge=deepClone(srcBadge);scene.titleTextScale=srcTitleScale;});
+    markDirty();render();status('Título, quadrado e numeral aplicados a '+list.length+' cena(s).');
+  };
+
+  const renderBeforeTitleBadgeScale=render;
+  render=function(){
+    ensureSceneExtras(state);
+    renderBeforeTitleBadgeScale();
+    const titleEl=$('#sceneTitle'),current=$('#quizSceneCurrent'),b=state.layout.sceneBadge;
+    if(titleEl){
+      const base=state.format==='9:16'?5.15:2.7;
+      titleEl.style.fontSize=(base*(Number(state.titleTextScale)||100)/100).toFixed(3)+'cqw';
+    }
+    if(current){
+      const baseDigit=Math.max(state.format==='9:16'?3.2:1.8,(Number(b.size)||5.5)*0.46);
+      current.style.fontSize=(baseDigit*(Number(b.digitScale)||100)/100).toFixed(3)+'cqw';
+    }
+    syncTitleBadgeScaleControls(state);
+  };
+
+  const schemaBeforeTitleBadgeScale=schemaData;
+  schemaData=function(){
+    const out=schemaBeforeTitleBadgeScale();
+    if(out.scene_patch){
+      out.scene_patch.titleTextScale='55-190 (100 = padrão)';
+      if(out.scene_patch.layout?.sceneBadge)out.scene_patch.layout.sceneBadge.digitScale='55-220 (100 = padrão)';
+    }
+    return out;
+  };
+
+  const reportBeforeTitleBadgeScale=coordinateReport;
+  coordinateReport=function(){
+    ensureSceneExtras(state);const b=state.layout.sceneBadge;
+    return reportBeforeTitleBadgeScale()+`\nTITLE_TEXT_SCALE = ${Math.round(Number(state.titleTextScale)||100)}%\nSCENE_BADGE_DIGIT_SCALE = ${Math.round(Number(b.digitScale)||100)}%\n`;
+  };
+
+
+  /* ===== Core I/O hardening: uploads, card edits and imports ===== */
+  function renderCardMediaHardSafe(key){
+    const opt=state?.[key],p=$('#picture-'+key);
+    if(!opt||!p)return;
+    if(opt.visible===false)return;
+    const src=opt.image||opt.imageUrl||'';
+    if(src){
+      const current=p.querySelector('img');
+      if(!current||current.src!==src){
+        p.replaceChildren();p.style.backgroundImage='none';
+        const img=new Image();img.src=src;img.alt=opt.label||('Opção '+key.toUpperCase());img.referrerPolicy='no-referrer';
+        img.onerror=()=>{
+          if(opt.image&&img.src!==opt.image){img.src=opt.image;return}
+          p.replaceChildren();
+          const msg=document.createElement('span');msg.textContent='Não foi possível abrir a imagem';msg.style.cssText='display:grid;place-items:center;height:100%;padding:10%;text-align:center;font-size:1cqw;color:#fff;opacity:.75';p.append(msg);
+        };
+        p.append(img);
+      }
+    }
+  }
+  async function safeReadCardImage(file){
+    if(!file)throw Error('Nenhum arquivo selecionado.');
+    if(!['image/png','image/jpeg','image/webp'].includes(file.type))throw Error('Use PNG, JPG ou WebP.');
+    if(file.size>12*1024*1024)throw Error('A imagem deve ter no máximo 12 MB.');
+    const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onerror=()=>reject(Error('Não foi possível ler a imagem.'));r.onload=()=>resolve(r.result);r.readAsDataURL(file)});
+    const image=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('Não foi possível abrir a imagem.'));im.src=data});
+    return {data,image};
+  }
+  async function safeSetCardImage(key,file){
+    try{
+      ensureSceneExtras(state);
+      const loaded=await safeReadCardImage(file);
+      const finalData=fitTransparent(loaded.image,loaded.data);
+      state[key].image=finalData;
+      state[key].imageUrl='';
+      state[key].assetId='';
+      state[key].size=100;
+      state[key].label=String(file.name||('OPÇÃO '+key.toUpperCase())).replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ').slice(0,32).toUpperCase();
+      markDirty();
+      render();
+      renderCardMediaHardSafe(key);
+      status('Imagem '+key.toUpperCase()+' carregada e aplicada ao card.');
+    }catch(err){status(err?.message||'Não foi possível carregar a imagem.');}
+  }
+
+  // Replace the critical upload path instead of stacking another fragile wrapper.
+  document.querySelectorAll('[data-upload]').forEach(btn=>{
+    btn.onclick=()=>{
+      const key=String(btn.dataset.upload||'').toLowerCase();
+      if(!OPTION_KEYS.includes(key))return;
+      target=key;
+      const input=$('#imageFile');input.value='';input.click();
+    };
+  });
+  const hardImageInput=$('#imageFile');
+  if(hardImageInput)hardImageInput.onchange=e=>{const file=e.target.files?.[0];if(file)safeSetCardImage(target,file)};
+
+  // Card controls always commit to state and go through the same final render path.
+  for(const key of OPTION_KEYS){
+    const label=$('#label-'+key),color=document.querySelector(`[data-color="${key}"]`),size=document.querySelector(`[data-size="${key}"]`);
+    if(label)label.oninput=e=>{ensureSceneExtras(state);state[key].label=String(e.target.value||'').slice(0,32);markDirty();render();};
+    if(color)color.oninput=e=>{ensureSceneExtras(state);state[key].color=e.target.value;markDirty();render();};
+    if(size)size.oninput=e=>{ensureSceneExtras(state);state[key].size=clamp(Number(e.target.value),60,300,state[key].size||100);markDirty();render();};
+  }
+
+  function extractImportedScenes(payload){
+    if(!payload||typeof payload!=='object')throw Error('Arquivo JSON inválido.');
+    if((payload.version===3||payload.version===2)&&payload.kind==='corvo-project'&&Array.isArray(payload.scenes))return payload.scenes;
+    if(payload.version===1&&typeof payload.title==='string')return [payload];
+    if(payload.kind==='corvo-scene-preset'&&payload.scene&&typeof payload.scene==='object')return [payload.scene];
+    if(Array.isArray(payload.presets)&&payload.presets.length===1&&payload.presets[0]?.scene)return [payload.presets[0].scene];
+    if(payload.scene&&typeof payload.scene==='object')return [payload.scene];
+    throw Error('Formato não reconhecido.');
+  }
+  const hardModelInput=$('#modelFile');
+  if(hardModelInput)hardModelInput.onchange=async e=>{
+    const file=e.target.files?.[0];if(!file)return;
+    if(dirty&&!confirm('Abrir outro projeto e substituir o atual? Salve antes se quiser guardar suas alterações.')){e.target.value='';return;}
+    try{
+      if(file.size>300*1024*1024)throw Error('Arquivo maior que 300 MB.');
+      const payload=JSON.parse(await file.text());
+      const imported=extractImportedScenes(payload);
+      if(!imported.length||imported.length>1000)throw Error('Quantidade de cenas inválida.');
+      const checked=imported.map(scene=>validateScene(deepClone(scene)));
+      scenes=checked;selection.clear();activeScene=0;state=scenes[0];dirty=false;
+      render();
+      status('Importação concluída: '+scenes.length+' cena(s) carregada(s).');
+    }catch(err){console.error('CORVO_IMPORT_ERROR',err);status('Não foi possível importar: '+(err?.message||'arquivo inválido')+'. O projeto atual foi preservado.');}
+    finally{e.target.value='';}
+  };
+
+  // Final media pass: local data URLs can never be overwritten by a stale Library URL.
+  const renderBeforeCoreIoHardening=render;
+  render=function(){
+    renderBeforeCoreIoHardening();
+    for(const key of OPTION_KEYS)renderCardMediaHardSafe(key);
+  };
+
+
   render();
 })();
 </script></body></html>
