@@ -48,12 +48,12 @@ html,body{width:100%;height:100%;margin:0;overflow:hidden}body{min-width:0}heade
 
 /* V15: option/button motion models. */
 .card{transform-origin:50% 50%;will-change:transform}
-.zoom-alternado .card{animation-name:optionZoomAlternate;animation-duration:5.2s;animation-timing-function:cubic-bezier(.45,.05,.2,1);animation-iteration-count:infinite}
+.zoom-alternado .card{transform-origin:center bottom;animation-name:optionZoomAlternate;animation-duration:5.2s;animation-timing-function:cubic-bezier(.45,.05,.2,1);animation-iteration-count:infinite}
 .zoom-alternado .card.a{animation-delay:0s}
 .zoom-alternado .card.b{animation-delay:-2.6s}
 .pulso-suave .card{animation-name:optionBreathe;animation-duration:4.6s;animation-timing-function:ease-in-out;animation-iteration-count:infinite;animation-delay:0s}
 .pulso-suave .card.b{animation-delay:-2.3s}
-@keyframes optionZoomAlternate{0%,50%,100%{transform:translateY(0) scale(1)}25%{transform:translateY(-.08cqw) scale(1.038)}}
+@keyframes optionZoomAlternate{0%,50%,100%{transform:scale(1)}25%{transform:scale(1.038)}}
 @keyframes optionBreathe{0%,100%{transform:scale(1)}50%{transform:scale(1.026)}}
 @media (prefers-reduced-motion:reduce){.zoom-alternado .card,.pulso-suave .card{animation:none!important;transform:none!important}}
 
@@ -236,11 +236,13 @@ function sceneMetrics(){
  for(const k of ['a','b']){
   const card=$('.card.'+k),badge=card.querySelector('.badge'),style=getComputedStyle(card),current=layoutRect(card),cardBase=current.y+current.h;
   const animation=card.getAnimations().find(a=>a.effect?.target===card&&['float','floatSmall','optionZoomAlternate','optionBreathe'].includes(a.animationName));
-  const samples=[];
-  if(animation){const time=animation.currentTime,play=animation.playState,t=animation.effect.getTiming();try{animation.pause();for(const offset of [0,.25,.5,.75]){animation.currentTime=(t.delay||0)+Number(t.duration)*offset;samples.push(rect(card),rect(badge))}}finally{animation.currentTime=time;if(play==='running')animation.play()}}
-  else samples.push(current,rect(badge));
+  const samples=[],animationBaseYs=[];
+  if(animation){const time=animation.currentTime,play=animation.playState,t=animation.effect.getTiming();try{animation.pause();for(const offset of [0,.125,.25,.375,.5,.625,.75,.875]){animation.currentTime=(t.delay||0)+Number(t.duration)*offset;const cr=rect(card);samples.push(cr,rect(badge));animationBaseYs.push(cr.y+cr.h)}}finally{animation.currentTime=time;if(play==='running')animation.play()}}
+  else{samples.push(current,rect(badge));animationBaseYs.push(cardBase)}
   const blocked=union(samples),margin=Math.max(shadowMargin(card),shadowMargin(card,'::after'),shadowMargin(badge));
-  options[k]={card,badge,style,current,blocked,margin,radius:Math.round(parseFloat(style.borderTopLeftRadius)*sx),cx:blocked.x+blocked.w/2,cy:blocked.y+blocked.h/2,base:blocked.y+blocked.h,cardBase,left:current.x,right:current.x+current.w,width:current.w};
+  const animationBaseMin=Math.min(...animationBaseYs),animationBaseMax=Math.max(...animationBaseYs),animationBaseDrift=animationBaseMax-animationBaseMin;
+  const baseFixedDuringAnimation=state.motion==='zoom-alternado'?animationBaseDrift<=1:true;
+  options[k]={card,badge,style,current,blocked,margin,radius:Math.round(parseFloat(style.borderTopLeftRadius)*sx),cx:blocked.x+blocked.w/2,cy:blocked.y+blocked.h/2,base:blocked.y+blocked.h,cardBase,left:current.x,right:current.x+current.w,width:current.w,animationBaseMin,animationBaseMax,animationBaseDrift,baseFixedDuringAnimation,transformOrigin:style.transformOrigin};
  }
  return {format,canvasW,canvasH,range,expand,fmt,titleBox,titleMargin,options};
 }
@@ -304,7 +306,7 @@ function backgroundMotionReport(m){
 function coordinateReport(){
  const m=sceneMetrics(),{format,canvasW,canvasH,range,expand,fmt,titleBox,titleMargin,options}=m;
  const a=options.a,b=options.b,sameBase=Math.abs(a.cardBase-b.cardBase)<=1;
- const motionName={'zoom-alternado':'Zoom alternado A ↔ B — cada opção amplia levemente em fase oposta','pulso-suave':'Respiração suave — pulso discreto em loop','subtle':'Flutuação suave','normal':'Flutuação normal','still':'Desligada'}[state.motion||'zoom-alternado'];
+ const motionName={'zoom-alternado':'Zoom alternado A ↔ B — escala em fase oposta com origem center bottom e base fixa','pulso-suave':'Respiração suave — pulso discreto em loop','subtle':'Flutuação suave','normal':'Flutuação normal','still':'Desligada'}[state.motion||'zoom-alternado'];
  const skinName={neon:'Neon original — gradiente escuro com glow luminoso',white:'Branca suave — cartão branco polido, cantos amplos e sombra suave',glass:'Vidro — painel translúcido com efeito de vidro',graphite:'Grafite — painel escuro neutro e discreto'}[state.skin||'neon'];
  const lines=['MAPA DE OCLUSÃO + GUIA DE ENQUADRAMENTO / INTEGRAÇÃO DO CENÁRIO','',
  `TELA: ${canvasW} × ${canvasH} px (${format}).`,
@@ -359,6 +361,15 @@ function coordinateReport(){
   lines.push(`OPÇÃO ${k.toUpperCase()}`,`Centro X=${fmt(center)} / Contato Y=${fmt(o.cardBase)}`,'');
  }
  if(sameBase)lines.push(`Y_INTEGRACAO_COMUM = ${fmt((a.cardBase+b.cardBase)/2)}`,'Use esta referência comum quando quiser apoiar visualmente A e B na mesma altura.','');
+ const zoomBaseFixed=state.motion==='zoom-alternado'&&a.baseFixedDuringAnimation&&b.baseFixedDuringAnimation&&sameBase;
+ lines.push('==================================================','VALIDAÇÃO DA BASE DURANTE A ANIMAÇÃO','==================================================','',
+  `ANIMAÇÃO VALIDADA: ${state.motion==='zoom-alternado'?'zoom alternado A ↔ B':motionName}`,
+  `ORIGEM_DA_TRANSFORMACAO = ${state.motion==='zoom-alternado'?'center bottom':'conforme animação selecionada'}`,
+  `BASE_FIXA_DURANTE_ANIMACAO = ${zoomBaseFixed?'true':'false'}`,'',
+  `OPÇÃO A — base mínima Y=${fmt(a.animationBaseMin)} / base máxima Y=${fmt(a.animationBaseMax)} / variação=${fmt(a.animationBaseDrift)} px`,
+  `OPÇÃO B — base mínima Y=${fmt(b.animationBaseMin)} / base máxima Y=${fmt(b.animationBaseMax)} / variação=${fmt(b.animationBaseDrift)} px`,'');
+ if(sameBase)lines.push(`Y_INTEGRACAO_COMUM = ${fmt((a.cardBase+b.cardBase)/2)}`,'Durante o zoom alternado, esta coordenada deve permanecer invariável.','A opção pode crescer para cima e lateralmente, mas a borda inferior não pode subir nem descer.','');
+ if(state.motion==='zoom-alternado'&&!zoomBaseFixed)lines.push('ATENÇÃO: a validação detectou deslocamento da base. O scaffold e a superfície de apoio não devem ser considerados aprovados até a animação voltar a preservar a linha canônica.','');
  lines.push('==================================================','ORIENTAÇÃO EM RELAÇÃO À CÂMERA','==================================================','',
   'Os cartões são elementos 2D sobrepostos pelo editor.',
   'Eles permanecem frontais à tela/câmera e não recebem perspectiva do cenário.',
@@ -695,23 +706,299 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
     getProject:(full=false)=>projectData(!!full),
     getSummary:()=>projectData(false)
   };
+  // Remote control is handled by the Corvo Library bridge below.
+
+  // ================================================================
+  // CORVO LIBRARY BRIDGE
+  // The Studio does NOT own a second MCP or Cloudflare connection.
+  // When embedded in Corvo Library it inherits the Library/Core bridge,
+  // receives push commands and resolves assets by asset_id + public URL.
+  // ================================================================
+  const QUIZ_BRIDGE_VERSION='corvo-library-quiz/v1';
+  const STUDIO_ID='quiz_'+(crypto?.randomUUID?.()||Math.random().toString(36).slice(2));
+  let studioRevision=1;
+  let hostConnected=false;
+  let hostMode='standalone';
+  let hostConnection={mcp_url:'',core_url:'',library_origin:'',connection_label:'',push:false};
+  let visualUrls={revision:0,scene:1,preview_url:'',debug_url:''};
+  let hostRequestSeq=1;
+  const hostPending=new Map();
+  let pushTimer=null,visualTimer=null;
+
+  const originalEnsureSceneExtrasForLibrary=ensureSceneExtras;
+  ensureSceneExtras=function(scene){
+    scene=originalEnsureSceneExtrasForLibrary(scene);
+    if(!scene)return scene;
+    scene.backgroundAssetId=String(scene.backgroundAssetId||scene.background_asset_id||'');
+    scene.backgroundUrl=String(scene.backgroundUrl||scene.background_url||'');
+    for(const k of ['a','b']){
+      const x=scene[k]||(scene[k]={});
+      x.assetId=String(x.assetId||x.asset_id||'');
+      x.imageUrl=String(x.imageUrl||x.image_url||x.url||'');
+      delete x.asset_id; delete x.image_url;
+    }
+    return scene;
+  };
+  scenes.forEach(ensureSceneExtras); ensureSceneExtras(state);
+
+  // Remote Library assets are referenced instead of materialized into ChatGPT.
+  const libraryAssetRender=render;
+  render=function(){
+    ensureSceneExtras(state);
+    libraryAssetRender();
+    const bg=$('.backdrop');
+    if(state.backgroundUrl) bg.src=state.backgroundUrl;
+    for(const k of ['a','b']){
+      const x=state[k],p=$('#picture-'+k);
+      if(x?.imageUrl){
+        p.replaceChildren(); p.style.backgroundImage='none';
+        const im=new Image(); im.src=x.imageUrl; im.alt=x.label||('Opção '+k.toUpperCase()); im.referrerPolicy='no-referrer';
+        p.append(im);
+      }
+    }
+  };
+
+  const compactSceneBase=compactScene;
+  compactScene=function(scene,idx){
+    const out=compactSceneBase(scene,idx); ensureSceneExtras(scene);
+    out.background_asset_id=scene.backgroundAssetId||null;
+    out.a.asset_id=scene.a.assetId||null;
+    out.b.asset_id=scene.b.assetId||null;
+    return out;
+  };
+
+  function studioSummary(){
+    return {
+      schema:QUIZ_BRIDGE_VERSION,
+      studio_id:STUDIO_ID,
+      revision:studioRevision,
+      active_scene:activeScene+1,
+      total_scenes:scenes.length,
+      format:state.format,
+      title:state.title,
+      scene_number:state.sceneNumber||String(activeScene+1),
+      a:{label:state.a.label,asset_id:state.a.assetId||null,color:state.a.color,image_scale:state.a.size},
+      b:{label:state.b.label,asset_id:state.b.assetId||null,color:state.b.color,image_scale:state.b.size},
+      visual:visualUrls.revision===studioRevision?visualUrls:null
+    };
+  }
+
+  function getDirectLibrary(){
+    try{if(window.CorvoLibrary&&typeof window.CorvoLibrary==='object')return window.CorvoLibrary}catch{}
+    try{if(window.parent&&window.parent!==window&&window.parent.CorvoLibrary&&typeof window.parent.CorvoLibrary==='object')return window.parent.CorvoLibrary}catch{}
+    return null;
+  }
+  function postHost(message){
+    if(window.parent&&window.parent!==window){try{window.parent.postMessage({source:'corvo-quiz-studio',version:QUIZ_BRIDGE_VERSION,studio_id:STUDIO_ID,...message},'*');return true}catch{}}
+    return false;
+  }
+  async function libraryRequest(op,payload={},timeout=8000){
+    const direct=getDirectLibrary();
+    if(direct){
+      try{
+        if(typeof direct.quizRequest==='function')return await direct.quizRequest(op,payload,{studio_id:STUDIO_ID,version:QUIZ_BRIDGE_VERSION});
+        if(typeof direct.request==='function')return await direct.request({scope:'quiz-studio',op,payload,studio_id:STUDIO_ID,version:QUIZ_BRIDGE_VERSION});
+        if(direct.quiz&&typeof direct.quiz.request==='function')return await direct.quiz.request(op,payload,{studio_id:STUDIO_ID});
+      }catch(err){throw Error(err?.message||'Falha na ponte direta com a Library.');}
+    }
+    if(!(window.parent&&window.parent!==window))throw Error('CORVO_LIBRARY_NOT_AVAILABLE');
+    const request_id='qreq_'+hostRequestSeq++;
+    return await new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{hostPending.delete(request_id);reject(Error('CORVO_LIBRARY_TIMEOUT'));},timeout);
+      hostPending.set(request_id,{resolve,reject,timer});
+      postHost({type:'request',request_id,op,payload});
+    });
+  }
+
+  function normalizeHostConnection(data={}){
+    const c=data?.connection||data||{};
+    return {
+      mcp_url:String(c.mcp_url||c.mcpUrl||''),
+      core_url:String(c.core_url||c.coreUrl||''),
+      library_origin:String(c.library_origin||c.origin||''),
+      connection_label:String(c.connection_label||c.label||'Corvo Library'),
+      push:Boolean(c.push??c.push_enabled??true)
+    };
+  }
+  function setHostConnection(data,mode='library'){
+    hostConnection=normalizeHostConnection(data); hostConnected=true; hostMode=mode;
+    updateIntegrationUI();
+    postHost({type:'ready',revision:studioRevision,state:studioSummary()});
+    scheduleHostStatePush(true);
+  }
+
+  async function detectLibraryHost(){
+    const direct=getDirectLibrary();
+    if(direct){
+      try{
+        let info={};
+        if(typeof direct.getConnection==='function')info=await direct.getConnection({safe:true,module:'quiz-studio'});
+        else if(direct.connection)info=direct.connection;
+        setHostConnection(info,'library-direct');
+        registerWithDirectHost(direct);
+        return true;
+      }catch{}
+    }
+    if(window.parent&&window.parent!==window){postHost({type:'hello',capabilities:studioCapabilities(),state:studioSummary()});hostMode='embedded-waiting';updateIntegrationUI();return true;}
+    hostMode='standalone';hostConnected=false;updateIntegrationUI();return false;
+  }
+  function registerWithDirectHost(direct){
+    try{
+      const api={studio_id:STUDIO_ID,version:QUIZ_BRIDGE_VERSION,capabilities:studioCapabilities(),handle:handleStudioCommand,getState:()=>projectData(false),getSummary:studioSummary};
+      if(typeof direct.registerQuizStudio==='function')direct.registerQuizStudio(api);
+      else if(direct.quiz&&typeof direct.quiz.register==='function')direct.quiz.register(api);
+    }catch{}
+  }
+
+  function studioCapabilities(){
+    return {
+      push:true,
+      batch:true,
+      asset_id:true,
+      remote_image_url:true,
+      visual_urls:true,
+      formats:['16:9','9:16'],
+      max_batch_ops:200,
+      commands:['get_state','get_project','get_scene','apply','apply_batch','set_active_scene','add_scene','duplicate_scene','delete_scene','move_scene','get_visual','export_scene']
+    };
+  }
+
+  async function resolveLibraryAsset(assetId,purpose='option'){
+    if(!assetId)throw Error('ASSET_ID_REQUIRED');
+    const data=await libraryRequest('asset.resolve',{asset_id:String(assetId),purpose});
+    const a=data?.asset||data||{};
+    const url=String(a.url||a.preview_url||a.signed_url||a.delivery_url||'');
+    if(!url)throw Error('ASSET_URL_NOT_RETURNED');
+    return {asset_id:String(a.asset_id||assetId),url,label:String(a.label||a.nome_semantico||a.name||'')};
+  }
+  async function hydrateAssetPatch(patch){
+    const out=deepClone(patch||{});
+    const bgId=out.background_asset_id||out.backgroundAssetId;
+    if(bgId){const a=await resolveLibraryAsset(bgId,'background');out.backgroundAssetId=a.asset_id;out.backgroundUrl=a.url;delete out.background_asset_id;}
+    if(out.clearBackground){out.background=null;out.backgroundUrl='';out.backgroundAssetId='';delete out.clearBackground;}
+    for(const k of ['a','b'])if(out[k]){
+      const x=out[k],id=x.asset_id||x.assetId,url=x.image_url||x.imageUrl||x.url||x.preview_url;
+      if(id){
+        if(url){x.assetId=String(id);x.imageUrl=String(url);}
+        else{const a=await resolveLibraryAsset(id,'option-'+k);x.assetId=a.asset_id;x.imageUrl=a.url;if(!x.label&&a.label)x.label=a.label;}
+      }else if(url){x.imageUrl=String(url);}
+      if(x.clearImage){x.image=null;x.imageUrl='';x.assetId='';delete x.clearImage;}
+      delete x.asset_id; delete x.image_url; delete x.url; delete x.preview_url;
+    }
+    return out;
+  }
+  async function hydrateStudioRequest(req){
+    const out=deepClone(req||{});
+    if(out.op==='set_scene'||out.op==='apply')out.patch=await hydrateAssetPatch(out.patch||{});
+    if(out.op==='add_scene')out.scene=await hydrateAssetPatch(out.scene||out.patch||{});
+    const operations=out.ops||out.operations;
+    if((out.op==='set_many'||out.op==='apply_batch')&&Array.isArray(operations)){
+      out.op='set_many';out.ops=operations;
+      await Promise.all(out.ops.map(async op=>{
+        if(op.op==='set_scene'||op.op==='apply'){op.op='set_scene';op.patch=await hydrateAssetPatch(op.patch||{});}
+        if(op.op==='add_scene')op.scene_data=await hydrateAssetPatch(op.scene_data||op.scene||op.patch||{});
+      }));
+    }
+    return out;
+  }
+
+  function bumpRevision(){studioRevision++;visualUrls={revision:0,scene:activeScene+1,preview_url:'',debug_url:''};scheduleHostStatePush();scheduleVisualPublish();}
+  function scheduleHostStatePush(immediate=false){
+    if(pushTimer)clearTimeout(pushTimer);
+    pushTimer=setTimeout(async()=>{
+      pushTimer=null;if(!hostConnected)return;
+      const payload={revision:studioRevision,active_scene:activeScene+1,project:projectData(false)};
+      try{await libraryRequest('quiz.state.push',payload,3500);}catch{postHost({type:'state',...payload});}
+    },immediate?0:90);
+  }
+  function scheduleVisualPublish(){
+    if(visualTimer)clearTimeout(visualTimer);
+    visualTimer=setTimeout(()=>publishVisual(false),220);
+  }
+  async function publishVisual(force=true){
+    if(!hostConnected)return null;
+    if(!force&&visualUrls.revision===studioRevision)return visualUrls;
+    const payload={studio_id:STUDIO_ID,revision:studioRevision,scene:activeScene+1,state:projectData(false)};
+    try{
+      const data=await libraryRequest('quiz.visual.publish',payload,12000);
+      const v=data?.visual||data||{};
+      visualUrls={revision:studioRevision,scene:activeScene+1,preview_url:String(v.preview_url||''),debug_url:String(v.debug_url||'')};
+      updateIntegrationUI();return visualUrls;
+    }catch{return null;}
+  }
+
+  const originalMarkDirtyForBridge=markDirty;
+  markDirty=function(){originalMarkDirtyForBridge();bumpRevision();};
+  const originalSwitchSceneForBridge=switchScene;
+  switchScene=function(index){const before=activeScene;const out=originalSwitchSceneForBridge(index);if(activeScene!==before){studioRevision++;scheduleHostStatePush();scheduleVisualPublish();}return out;};
+
+  async function handleStudioCommand(request={}){
+    try{
+      let req=await hydrateStudioRequest(request);
+      const op=req.op||'';
+      if(op==='get_state')return {ok:true,data:studioSummary()};
+      if(op==='get_project')return {ok:true,data:projectData(Boolean(req.full))};
+      if(op==='get_visual'){
+        const v=await publishVisual(true);return {ok:true,data:{scene:activeScene+1,revision:studioRevision,...(v||{})}};
+      }
+      if(op==='apply'){req.op='set_scene';req.scene=req.scene||activeScene+1;}
+      if(op==='apply_batch'){req.op='set_many';req.ops=req.operations||req.ops||[];}
+      if(op==='export_scene'){req.op='export_scene_package';}
+      const beforeRevision=studioRevision;
+      const result=await handleMcp(req);
+      if(result?.ok&&['set_scene','set_many','add_scene','duplicate_scene','delete_scene','move_scene','set_active_scene'].includes(req.op)){
+        if(studioRevision===beforeRevision)bumpRevision();else{scheduleHostStatePush();scheduleVisualPublish();}
+        const updated=result.updated??(req.op==='set_many'?(req.ops?.length||0):1);
+        return {ok:true,updated,revision:studioRevision,active_scene:activeScene+1,total_scenes:scenes.length};
+      }
+      return result;
+    }catch(err){return {ok:false,error:err?.message||'QUIZ_COMMAND_FAILED',revision:studioRevision};}
+  }
+
+  window.CorvoQuizStudio={
+    version:QUIZ_BRIDGE_VERSION,
+    studio_id:STUDIO_ID,
+    capabilities:studioCapabilities,
+    handle:handleStudioCommand,
+    run:handleStudioCommand,
+    getState:()=>projectData(false),
+    getProject:(full=false)=>projectData(!!full),
+    getSummary:studioSummary,
+    getVisual:()=>publishVisual(true),
+    detectLibrary:detectLibraryHost,
+    resolveAsset:resolveLibraryAsset
+  };
+  // Compatibility for code written during the standalone prototype.
+  window.CorvoQuizMCP=window.CorvoQuizStudio;
+
   window.addEventListener('message',async e=>{
-    const msg=e.data; if(!msg||msg.source!=='corvo-mcp') return;
-    const result=await handleMcp(msg.request);
-    try{ e.source&&e.source.postMessage({source:'corvo-mcp-response',id:msg.id||null,result},'*'); }catch{}
+    const msg=e.data;if(!msg||msg.source!=='corvo-library')return;
+    if(msg.type==='response'&&msg.request_id&&hostPending.has(msg.request_id)){
+      const p=hostPending.get(msg.request_id);hostPending.delete(msg.request_id);clearTimeout(p.timer);
+      if(msg.ok===false)p.reject(Error(msg.error||'CORVO_LIBRARY_REQUEST_FAILED'));else p.resolve(msg.data??msg.result??msg.payload);
+      return;
+    }
+    if(msg.type==='connection'||msg.type==='hello-ack'){
+      setHostConnection(msg.connection||msg.data||{},'library-postmessage');return;
+    }
+    if(msg.type==='visual'){
+      visualUrls={revision:Number(msg.revision||studioRevision),scene:Number(msg.scene||activeScene+1),preview_url:String(msg.preview_url||''),debug_url:String(msg.debug_url||'')};updateIntegrationUI();return;
+    }
+    if(msg.type==='quiz.command'){
+      const result=await handleStudioCommand(msg.request||msg.command||{});
+      postHost({type:'quiz.ack',command_id:msg.command_id||msg.id||null,result});
+    }
   });
 
-
-  // Dedicated Settings > MCP UI. Technical MCP handler remains internal and out of the editor flow.
+  // Settings is informational only: connection is inherited from Corvo Library.
   const settingsDialog=document.createElement('dialog');
-  settingsDialog.id='settingsDialog';
-  settingsDialog.className='settings-dialog';
+  settingsDialog.id='settingsDialog';settingsDialog.className='settings-dialog';
   settingsDialog.innerHTML=`
     <div class="settings-shell">
       <nav class="settings-nav" aria-label="Configurações">
         <div class="settings-brand">CORVO STUDIO</div>
         <button type="button" data-settings-pane="general">⚙ Geral</button>
-        <button type="button" class="active" data-settings-pane="mcp">⌁ MCP</button>
+        <button type="button" class="active" data-settings-pane="mcp">⌁ Library / MCP</button>
       </nav>
       <section class="settings-main">
         <div class="settings-pane" data-pane="general">
@@ -719,198 +1006,71 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
           <div class="settings-section"><strong>Configurações gerais</strong><p class="settings-note">Os controles de formato, aparência e cenas continuam no editor principal.</p></div>
         </div>
         <div class="settings-pane active" data-pane="mcp">
-          <div class="settings-head"><div><div class="settings-eyebrow">MCP para ChatGPT</div><h2>Conectar ao GPT</h2><p>Use um endpoint MCP remoto dedicado a este app. A autenticação é Nenhuma.</p></div><button type="button" class="settings-close" aria-label="Fechar">×</button></div>
+          <div class="settings-head"><div><div class="settings-eyebrow">Integração Corvo</div><h2>Library / MCP</h2><p>O Studio reutiliza a conexão da Corvo Library. Não existe uma segunda API key ou um segundo MCP.</p></div><button type="button" class="settings-close" aria-label="Fechar">×</button></div>
           <div class="settings-section soft">
-            <span class="settings-label">Endpoint MCP remoto</span>
-            <div class="endpoint-row"><input id="settingsMcpEndpoint" type="text" readonly aria-readonly="true" value="Gerando endpoint MCP…"></div>
-            <div class="settings-actions"><button type="button" class="mcp-primary" id="settingsCopyMcp">Copiar link MCP</button><button type="button" id="settingsCopyChatGPT">Copiar para ChatGPT</button></div>
-            <div class="settings-note" id="settingsMcpEndpointNote">O endpoint é gerado automaticamente por este app. Você só precisa copiá-lo para o plugin do GPT.</div>
+            <span class="settings-label">Conexão</span>
+            <div class="mcp-status-grid"><div><strong id="libraryConnectionLabel">Aguardando Corvo Library</strong><p id="libraryConnectionNote">Quando este editor estiver dentro da Library, a conexão será herdada automaticamente.</p></div><span class="mcp-pill mcp-empty" id="libraryConnectionPill"><span class="mcp-dot"></span>Aguardando</span></div>
           </div>
           <div class="settings-section">
-            <span class="settings-label">Autenticação</span>
-            <div class="mcp-status-grid"><div><strong>Nenhuma</strong><p>No ChatGPT, informe somente o endpoint e selecione a opção sem autenticação.</p></div><span class="mcp-pill"><span class="mcp-dot"></span>Público</span></div>
+            <span class="settings-label">Endpoint MCP compartilhado</span>
+            <div class="endpoint-row"><input id="libraryMcpEndpoint" type="text" readonly aria-readonly="true" value="Herdado da Corvo Library"></div>
+            <div class="settings-actions"><button type="button" class="mcp-primary" id="libraryCopyMcp" disabled>Copiar endpoint</button></div>
+            <div class="settings-note">O ChatGPT usa o MCP da própria Library, que receberá também as ferramentas do Quiz Studio.</div>
           </div>
           <div class="settings-section">
-            <span class="settings-label">Rota pública dedicada</span>
-            <div class="mcp-status-grid"><div><strong id="settingsMcpRouteLabel">Nenhuma conexão configurada</strong><p>A rota MCP deve ser dedicada ao ChatGPT. O editor continua separado dos controles administrativos.</p></div><span class="mcp-pill mcp-empty" id="settingsMcpStatus"><span class="mcp-dot"></span>Não conectado</span></div>
+            <span class="settings-label">Automação</span>
+            <div class="mcp-status-grid"><div><strong>Push de baixa latência</strong><p>Títulos, números, formato, cores, layout e assets podem chegar em lote sem upload no chat.</p></div><span class="mcp-pill" id="libraryPushPill"><span class="mcp-dot"></span>Preparado</span></div>
           </div>
           <div class="settings-section">
-            <span class="settings-label">Conexão MCP</span>
-            <div class="mcp-status-grid"><div><strong>Revogar e gerar outro</strong><p>O endpoint atual é invalidado e um novo endpoint válido é criado imediatamente para substituir a conexão anterior.</p></div><button type="button" class="mcp-danger" id="settingsRevokeMcp">Revogar e gerar novo</button></div>
+            <span class="settings-label">Visão do ChatGPT</span>
+            <div class="mcp-status-grid"><div><strong id="visualStatusLabel">Preview público via Library</strong><p>O Core fornece URLs de preview e debug. A IA abre a URL; nenhuma imagem precisa ser materializada na conversa.</p></div><span class="mcp-pill mcp-empty" id="visualStatusPill"><span class="mcp-dot"></span>Aguardando</span></div>
+            <div class="settings-actions"><button type="button" id="copyPreviewUrl" disabled>Copiar preview</button><button type="button" id="copyDebugUrl" disabled>Copiar debug</button></div>
+          </div>
+          <div class="settings-section">
+            <span class="settings-label">Assets da Library</span>
+            <div class="mcp-status-grid"><div><strong>asset_id → editor</strong><p>O MCP envia o asset_id; a Library devolve uma URL acessível e o editor troca a imagem por push, sem copiar arquivos para o ChatGPT.</p></div><span class="mcp-pill"><span class="mcp-dot"></span>Pronto</span></div>
           </div>
         </div>
       </section>
     </div>`;
   document.body.appendChild(settingsDialog);
 
-  const MCP_STORAGE_KEY='corvo.quiz.mcp.connection';
-  const MCP_CONNECTION_API='/api/mcp-connection';
-  const loadConnection=()=>{try{return JSON.parse(localStorage.getItem(MCP_STORAGE_KEY)||'null')}catch{return null}};
-  const saveConnection=value=>{try{value?localStorage.setItem(MCP_STORAGE_KEY,JSON.stringify(value)):localStorage.removeItem(MCP_STORAGE_KEY)}catch{}};
-  const mcpEndpointInput=settingsDialog.querySelector('#settingsMcpEndpoint');
-  const mcpEndpointNote=settingsDialog.querySelector('#settingsMcpEndpointNote');
-  let mcpConnection=loadConnection();
-  let mcpConnectionBusy=false;
-
-  async function mcpApi(path='',options={}){
-    const res=await fetch(MCP_CONNECTION_API+(path||''),{headers:{'content-type':'application/json',...(options.headers||{})},...options});
-    const data=await res.json().catch(()=>({}));
-    if(!res.ok)throw Error(data.error||data.message||'Não foi possível atualizar a conexão MCP.');
-    return data;
-  }
-  function normalizeConnection(data){
-    const src=data?.connection||data;
-    if(!src||typeof src.endpoint!=='string'||!/^https?:\/\//i.test(src.endpoint))throw Error('O backend não retornou um endpoint MCP válido.');
-    return {
-      id:String(src.id||src.connection_id||src.client_id||''),
-      endpoint:src.endpoint,
-      client_id:String(src.client_id||src.id||''),
-      client_secret:String(src.client_secret||''),
-      created_at:src.created_at||new Date().toISOString()
-    };
-  }
-  function updateSettingsMcpStatus(message=''){
-    const value=mcpConnection?.endpoint||'';
-    const label=settingsDialog.querySelector('#settingsMcpRouteLabel');
-    const pill=settingsDialog.querySelector('#settingsMcpStatus');
-    mcpEndpointInput.value=value||(mcpConnectionBusy?'Gerando endpoint MCP…':'Endpoint indisponível');
-    mcpEndpointInput.title=value;
-    if(value){
-      label.textContent=value;
-      pill.classList.remove('mcp-empty');pill.lastChild.textContent=' Ativo';
-      mcpEndpointNote.textContent=message||'Endpoint ativo gerado automaticamente. Copie este endereço para o plugin do GPT.';
-      window.CorvoQuizMCP.endpoint=value;
+  function updateIntegrationUI(){
+    if(!settingsDialog)return;
+    const label=settingsDialog.querySelector('#libraryConnectionLabel'),note=settingsDialog.querySelector('#libraryConnectionNote'),pill=settingsDialog.querySelector('#libraryConnectionPill');
+    const endpoint=settingsDialog.querySelector('#libraryMcpEndpoint'),copy=settingsDialog.querySelector('#libraryCopyMcp');
+    if(hostConnected){
+      label.textContent=hostConnection.connection_label||'Corvo Library';
+      note.textContent='Conexão herdada automaticamente. O Studio não armazena nem solicita outra API key.';
+      pill.classList.remove('mcp-empty');pill.lastChild.textContent=' Conectado';
+      endpoint.value=hostConnection.mcp_url||'MCP compartilhado pela Library';copy.disabled=!hostConnection.mcp_url;
     }else{
-      label.textContent=mcpConnectionBusy?'Criando rota pública dedicada…':'Nenhum endpoint ativo';
-      pill.classList.add('mcp-empty');pill.lastChild.textContent=mcpConnectionBusy?' Gerando':' Indisponível';
-      mcpEndpointNote.textContent=message||(mcpConnectionBusy?'Aguarde enquanto o app cria a conexão.':'Este deploy ainda não possui o gerenciador MCP disponível.');
-      window.CorvoQuizMCP.endpoint='';
+      label.textContent=hostMode==='embedded-waiting'?'Detectando Corvo Library…':'Modo standalone de desenvolvimento';
+      note.textContent=hostMode==='embedded-waiting'?'Aguardando a Library responder ao handshake.':'Ao incorporar este editor na Library, esta conexão será automática.';
+      pill.classList.add('mcp-empty');pill.lastChild.textContent=hostMode==='embedded-waiting'?' Detectando':' Aguardando';
+      endpoint.value='Herdado da Corvo Library';copy.disabled=true;
     }
-    settingsDialog.querySelector('#settingsCopyMcp').disabled=!value||mcpConnectionBusy;
-    settingsDialog.querySelector('#settingsCopyChatGPT').disabled=!value||mcpConnectionBusy;
-    settingsDialog.querySelector('#settingsRevokeMcp').disabled=!value||mcpConnectionBusy;
+    const pv=settingsDialog.querySelector('#copyPreviewUrl'),dv=settingsDialog.querySelector('#copyDebugUrl'),vp=settingsDialog.querySelector('#visualStatusPill');
+    pv.disabled=!visualUrls.preview_url;dv.disabled=!visualUrls.debug_url;
+    if(visualUrls.preview_url||visualUrls.debug_url){vp.classList.remove('mcp-empty');vp.lastChild.textContent=' Disponível';}else{vp.classList.add('mcp-empty');vp.lastChild.textContent=' Aguardando';}
   }
-  async function ensureMcpConnection(force=false){
-    if(mcpConnectionBusy)return mcpConnection;
-    if(mcpConnection?.endpoint&&mcpConnection?.client_secret&&!force){updateSettingsMcpStatus();return mcpConnection;}
-    mcpConnectionBusy=true;updateSettingsMcpStatus();
-    try{
-      const data=await mcpApi('',{method:'POST',body:JSON.stringify({action:'create',schema:'corvo-quiz-app/v1',client_id:mcpConnection?.client_id||null,client_secret:mcpConnection?.client_secret||null})});
-      mcpConnection=normalizeConnection(data);saveConnection(mcpConnection);updateSettingsMcpStatus('Endpoint novo criado e ativo.');
-      return mcpConnection;
-    }catch(err){
-      mcpConnection=null;saveConnection(null);updateSettingsMcpStatus(err.message);return null;
-    }finally{mcpConnectionBusy=false;updateSettingsMcpStatus(mcpConnection?.endpoint?'Endpoint ativo gerado automaticamente. Copie este endereço para o plugin do GPT.':'Este deploy precisa disponibilizar '+MCP_CONNECTION_API+' para gerar endpoints MCP reais.');}
-  }
-  async function rotateMcpConnection(){
-    if(mcpConnectionBusy)return;
-    mcpConnectionBusy=true;updateSettingsMcpStatus('Revogando endpoint atual e gerando outro…');
-    const old=mcpConnection;
-    try{
-      const data=await mcpApi('',{method:'POST',body:JSON.stringify({action:'rotate',client_id:old?.client_id||old?.id||null,client_secret:old?.client_secret||null,schema:'corvo-quiz-app/v1'})});
-      mcpConnection=normalizeConnection(data);saveConnection(mcpConnection);
-      status('Endpoint MCP anterior revogado. Novo endpoint gerado.');
-      updateSettingsMcpStatus('Novo endpoint ativo. O endereço anterior não deve mais aceitar conexões.');
-    }catch(err){
-      mcpConnection=old;saveConnection(old);updateSettingsMcpStatus('Não foi possível rotacionar: '+err.message);status('Falha ao revogar/gerar endpoint MCP.');
-    }finally{mcpConnectionBusy=false;updateSettingsMcpStatus(mcpConnection?.endpoint?'Endpoint ativo gerado automaticamente. Copie este endereço para o plugin do GPT.':'Endpoint MCP indisponível.');}
-  }
-  updateSettingsMcpStatus();
-
   const openSettings=pane=>{
     settingsDialog.querySelectorAll('[data-settings-pane]').forEach(b=>b.classList.toggle('active',b.dataset.settingsPane===pane));
     settingsDialog.querySelectorAll('[data-pane]').forEach(p=>p.classList.toggle('active',p.dataset.pane===pane));
-    if(!settingsDialog.open)settingsDialog.showModal();
-    if(pane==='mcp')ensureMcpConnection();
+    if(!settingsDialog.open)settingsDialog.showModal();updateIntegrationUI();
+    if(pane==='mcp')detectLibraryHost();
   };
   $('#settingsBtn')?.addEventListener('click',()=>openSettings('mcp'));
   settingsDialog.querySelectorAll('.settings-close').forEach(b=>b.addEventListener('click',()=>settingsDialog.close()));
   settingsDialog.querySelectorAll('[data-settings-pane]').forEach(b=>b.addEventListener('click',()=>openSettings(b.dataset.settingsPane)));
   settingsDialog.addEventListener('click',e=>{if(e.target===settingsDialog)settingsDialog.close()});
-  settingsDialog.querySelector('#settingsCopyMcp').addEventListener('click',async()=>{
-    const endpoint=mcpConnection?.endpoint; if(!endpoint){status('Nenhum endpoint MCP ativo.');return}
-    try{await navigator.clipboard.writeText(endpoint);status('Link MCP copiado.')}catch{status('Não foi possível copiar automaticamente.')}
-  });
-  settingsDialog.querySelector('#settingsCopyChatGPT').addEventListener('click',async()=>{
-    const endpoint=mcpConnection?.endpoint; if(!endpoint){status('Nenhum endpoint MCP ativo.');return}
-    const txt=`Endpoint MCP: ${endpoint}\nAutenticação: Nenhuma`;
-    try{await navigator.clipboard.writeText(txt);status('Dados para conectar no ChatGPT copiados.')}catch{status('Não foi possível copiar automaticamente.')}
-  });
-  settingsDialog.querySelector('#settingsRevokeMcp').addEventListener('click',async()=>{
-    if(!mcpConnection?.endpoint){await ensureMcpConnection(true);return}
-    if(!confirm('Revogar o endpoint MCP atual e gerar um novo agora? O endereço atual deixará de ser válido.'))return;
-    await rotateMcpConnection();
-  });
+  const copyText=async(value,label)=>{if(!value)return;try{await navigator.clipboard.writeText(value);status(label+' copiado.')}catch{status('Não foi possível copiar automaticamente.')}};
+  settingsDialog.querySelector('#libraryCopyMcp').addEventListener('click',()=>copyText(hostConnection.mcp_url,'Endpoint MCP'));
+  settingsDialog.querySelector('#copyPreviewUrl').addEventListener('click',()=>copyText(visualUrls.preview_url,'URL de preview'));
+  settingsDialog.querySelector('#copyDebugUrl').addEventListener('click',()=>copyText(visualUrls.debug_url,'URL de debug'));
 
-  const MCP_SYNC_API='/api/mcp-sync';
-  let mcpSyncTimer=null,mcpHeartbeatTimer=null,mcpSyncBusy=false;
-  const fileToDataUrl=blob=>new Promise((resolve,reject)=>{const r=new FileReader();r.onerror=()=>reject(Error('Falha ao converter imagem remota.'));r.onload=()=>resolve(r.result);r.readAsDataURL(blob)});
-  async function fetchRemoteImage(url){
-    if(!/^https?:\/\//i.test(String(url||'')))throw Error('URL de imagem inválida.');
-    const c=mcpConnection;if(!c?.client_id||!c?.client_secret)throw Error('Conexão MCP local indisponível.');
-    const res=await fetch('/api/mcp-media?url='+encodeURIComponent(url),{headers:{'x-corvo-client':c.client_id,'x-corvo-secret':c.client_secret}});
-    if(!res.ok){const d=await res.json().catch(()=>({}));throw Error(d.error||'Falha ao baixar imagem remota.');}
-    return fileToDataUrl(await res.blob());
-  }
-  async function resolveRemotePatch(patch){
-    const out=deepClone(patch||{});
-    if(out.backgroundUrl){out.background=await fetchRemoteImage(out.backgroundUrl);delete out.backgroundUrl;}
-    if(out.clearBackground){out.background=null;delete out.clearBackground;}
-    for(const k of ['a','b'])if(out[k]){
-      if(out[k].imageUrl){out[k].image=await fetchRemoteImage(out[k].imageUrl);delete out[k].imageUrl;}
-      if(out[k].clearImage){out[k].image=null;delete out[k].clearImage;}
-    }
-    return out;
-  }
-  async function prepareRemoteRequest(req){
-    const out=deepClone(req||{});
-    if(out.op==='set_scene')out.patch=await resolveRemotePatch(out.patch);
-    if(out.op==='add_scene')out.scene=await resolveRemotePatch(out.scene||out.patch||{});
-    if(out.op==='set_many'&&Array.isArray(out.ops))for(const op of out.ops){
-      if(op.op==='set_scene')op.patch=await resolveRemotePatch(op.patch);
-      if(op.op==='add_scene')op.scene_data=await resolveRemotePatch(op.scene_data||op.patch||op.data||{});
-    }
-    return out;
-  }
-  async function syncApi(payload){
-    const c=mcpConnection;if(!c?.client_id||!c?.client_secret)return null;
-    const res=await fetch(MCP_SYNC_API,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...payload,client_id:c.client_id,client_secret:c.client_secret})});
-    const data=await res.json().catch(()=>({}));if(!res.ok)throw Error(data.error||'Falha na ponte MCP.');return data;
-  }
-  async function pushMcpSnapshot(){
-    try{await syncApi({action:'heartbeat',state:projectData(false)});}catch{}
-  }
-  async function pullMcpCommand(){
-    if(mcpSyncBusy||!mcpConnection?.client_secret)return;
-    mcpSyncBusy=true;
-    try{
-      const data=await syncApi({action:'pull'}),cmd=data?.command;
-      if(!cmd?.id||!cmd?.request)return;
-      let result;
-      try{result=await window.CorvoQuizMCP.handle(await prepareRemoteRequest(cmd.request));}
-      catch(err){result={ok:false,error:err?.message||'Falha ao aplicar comando remoto.'};}
-      await syncApi({action:'ack',command_id:cmd.id,result});
-      await pushMcpSnapshot();
-      if(result?.ok)status('MCP atualizou o projeto.');
-    }catch{}finally{mcpSyncBusy=false;}
-  }
-  function stopMcpSync(){if(mcpSyncTimer)clearInterval(mcpSyncTimer);if(mcpHeartbeatTimer)clearInterval(mcpHeartbeatTimer);mcpSyncTimer=mcpHeartbeatTimer=null;}
-  function startMcpSync(){
-    stopMcpSync();if(!mcpConnection?.client_secret)return;
-    pushMcpSnapshot();pullMcpCommand();
-    mcpSyncTimer=setInterval(pullMcpCommand,900);
-    mcpHeartbeatTimer=setInterval(pushMcpSnapshot,3000);
-  }
-  const originalEnsureMcpConnection=ensureMcpConnection;
-  ensureMcpConnection=async function(force=false){const c=await originalEnsureMcpConnection(force);if(c?.client_secret)startMcpSync();return c;};
-  const originalRotateMcpConnection=rotateMcpConnection;
-  rotateMcpConnection=async function(){const r=await originalRotateMcpConnection();startMcpSync();return r;};
-  if(mcpConnection?.client_secret)startMcpSync();
-
-  window.CorvoQuizMCP.connectionApi=MCP_CONNECTION_API;
-  window.CorvoQuizMCP.ensureConnection=ensureMcpConnection;
-  window.CorvoQuizMCP.rotateConnection=rotateMcpConnection;
-  window.CorvoQuizMCP.syncApi=MCP_SYNC_API;
+  // Announce on startup; in standalone mode this is intentionally a no-op.
+  setTimeout(()=>detectLibraryHost(),50);
 
 
   render();
