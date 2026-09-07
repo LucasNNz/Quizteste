@@ -3018,6 +3018,133 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
   };
 
 
+  /* ===== Auto-fit card geometry to uploaded image + unified scene badge scale ===== */
+  function decodedImageFromSource(src,fallback=null){
+    return new Promise(resolve=>{
+      if(!src){resolve(fallback);return}
+      const img=new Image();
+      img.onload=()=>resolve(img);
+      img.onerror=()=>resolve(fallback);
+      img.src=src;
+    });
+  }
+  function autoFitCardGeometryToImage(scene,key,image){
+    ensureSceneExtras(scene);
+    if(!scene?.layout?.options?.[key]||!image)return false;
+    const box=scene.layout.options[key];
+    const canvas=sceneCanvas(scene.format);
+    const naturalW=Math.max(1,Number(image.naturalWidth||image.width)||1);
+    const naturalH=Math.max(1,Number(image.naturalHeight||image.height)||1);
+    const imageAspect=clamp(naturalW/naturalH,.42,2.65,1);
+    const centerX=(Number(box.x)+Number(box.w)/2)/100*canvas.w;
+    const baseY=(Number(box.y)+Number(box.h))/100*canvas.h;
+
+    // Circular cards must remain circular. Their image still uses contain, but
+    // switching/uploading media must never deform the circle.
+    if(scene.frameShape==='round'){
+      scene.optionLayoutMode='manual';
+      scene.layoutFormat=scene.format;
+      return true;
+    }
+
+    // The picture occupies ~90% of card width and ~79% of card height.
+    // This converts the media aspect into the ideal outer-card aspect.
+    const targetCardAspect=clamp(imageAspect*(.79/.90),.46,2.35,1);
+    let heightPx=Math.max(1,Number(box.h)/100*canvas.h);
+    let widthPx=heightPx*targetCardAspect;
+    const activeCount=Math.max(1,visibleOptionKeys(scene).length);
+    const vertical=scene.format==='9:16';
+    const maxWidthPct=vertical?(activeCount<=3?82:44):(activeCount===1?62:activeCount===2?41:activeCount===3?29:22.5);
+    const minWidthPct=vertical?22:10;
+    const maxHeightPct=vertical?(activeCount<=2?36:activeCount===3?27:31):57;
+    const minHeightPct=vertical?12:17;
+    const minW=canvas.w*minWidthPct/100,maxW=canvas.w*maxWidthPct/100;
+    const minH=canvas.h*minHeightPct/100,maxH=canvas.h*maxHeightPct/100;
+
+    if(widthPx>maxW){widthPx=maxW;heightPx=widthPx/targetCardAspect}
+    if(widthPx<minW){widthPx=minW;heightPx=widthPx/targetCardAspect}
+    if(heightPx>maxH){heightPx=maxH;widthPx=heightPx*targetCardAspect}
+    if(heightPx<minH){heightPx=minH;widthPx=heightPx*targetCardAspect}
+    widthPx=Math.min(maxW,Math.max(minW,widthPx));
+    heightPx=Math.min(maxH,Math.max(minH,heightPx));
+
+    box.w=widthPx/canvas.w*100;
+    box.h=heightPx/canvas.h*100;
+    box.x=clamp((centerX-widthPx/2)/canvas.w*100,0,Math.max(0,100-box.w),box.x);
+    box.y=clamp((baseY-heightPx)/canvas.h*100,0,Math.max(0,100-box.h),box.y);
+    scene.optionLayoutMode='manual';
+    scene.layoutFormat=scene.format;
+    scene[key].mediaAspect=imageAspect;
+    return true;
+  }
+
+  const safeSetCardImageBeforeAutoGeometry=safeSetCardImage;
+  safeSetCardImage=async function(key,file){
+    try{
+      ensureSceneExtras(state);
+      const loaded=await safeReadCardImage(file);
+      const finalData=fitTransparent(loaded.image,loaded.data);
+      const fittedImage=await decodedImageFromSource(finalData,loaded.image);
+      state[key].image=finalData;
+      state[key].imageUrl='';
+      state[key].assetId='';
+      state[key].size=100;
+      state[key].label=String(file.name||('OPÇÃO '+key.toUpperCase())).replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ').slice(0,32).toUpperCase();
+      autoFitCardGeometryToImage(state,key,fittedImage||loaded.image);
+      markDirty();
+      render();
+      renderCardMediaHardSafe(key);
+      syncPlacementTextareaFromState?.(true);
+      status('Imagem '+key.toUpperCase()+' carregada · card reajustado automaticamente ao formato da imagem.');
+    }catch(err){status(err?.message||'Não foi possível carregar a imagem.');}
+  };
+  // Rebind the final file input to the new auto-fit upload path.
+  if(hardImageInput)hardImageInput.onchange=e=>{const file=e.target.files?.[0];if(file)safeSetCardImage(target,file)};
+
+  // One scale controls both the green block and its numeral.
+  const digitField=$('#sceneBadgeDigitScale')?.closest('.field');
+  if(digitField)digitField.remove();
+  const badgeScaleField=$('#sceneBadgeScale')?.closest('.field');
+  const badgeScaleLabel=badgeScaleField?.querySelector(':scope > span');
+  if(badgeScaleLabel)badgeScaleLabel.textContent='Escala do quadrado + numeral';
+  const badgeControls=document.querySelector('.scene-badge-controls');
+  const badgeNote=badgeControls?.querySelector('.skin-note');
+  if(badgeNote)badgeNote.textContent='O quadrado verde e o numeral usam uma única escala e continuam arrastáveis juntos no canvas.';
+
+  const ensureBeforeUnifiedBadgeScale=ensureSceneExtras;
+  ensureSceneExtras=function(scene){
+    scene=ensureBeforeUnifiedBadgeScale(scene);
+    if(scene?.layout?.sceneBadge)scene.layout.sceneBadge.digitScale=100;
+    return scene;
+  };
+  scenes.forEach(ensureSceneExtras);ensureSceneExtras(state);
+
+  const renderBeforeUnifiedBadgeScale=render;
+  render=function(){
+    ensureSceneExtras(state);
+    renderBeforeUnifiedBadgeScale();
+    const current=$('#quizSceneCurrent'),b=state.layout?.sceneBadge;
+    if(current&&b){
+      const size=Number(b.size)||5.5;
+      // Letter remains proportional to the block in both formats.
+      const digit=size*(state.format==='9:16'?.43:.46);
+      current.style.fontSize=Math.max(state.format==='9:16'?1.7:1.15,digit).toFixed(3)+'cqw';
+    }
+  };
+
+  const reportBeforeUnifiedBadgeScale=coordinateReport;
+  coordinateReport=function(){
+    const report=reportBeforeUnifiedBadgeScale();
+    return report.replace(/\nSCENE_BADGE_DIGIT_SCALE\s*=\s*[^\n]*/g,'');
+  };
+  const schemaBeforeUnifiedBadgeScale=schemaData;
+  schemaData=function(){
+    const out=schemaBeforeUnifiedBadgeScale();
+    try{if(out.scene_patch?.layout?.sceneBadge)delete out.scene_patch.layout.sceneBadge.digitScale}catch{}
+    return out;
+  };
+
+
   render();
 })();
 </script></body></html>
