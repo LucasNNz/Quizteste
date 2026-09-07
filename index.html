@@ -464,14 +464,14 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
 
   const LAYOUT_PRESETS={
     '16:9':{
-      title:{x:6,y:4.5,w:88,h:13},
-      sceneBadge:{x:1.4,y:1.6,size:5.5},
-      options:{a:{x:20,y:27,w:24,h:46},b:{x:58,y:27,w:24,h:46}}
+      title:{x:1.5,y:4.5,w:97,h:13},
+      sceneBadge:{x:2.1,y:5.0,size:5.5},
+      options:{a:{x:24,y:27,w:20,h:46},b:{x:56,y:27,w:20,h:46}}
     },
     '9:16':{
-      title:{x:7,y:4.4,w:86,h:10.8},
-      sceneBadge:{x:3,y:2.6,size:11},
-      options:{a:{x:11,y:27,w:32,h:26},b:{x:57,y:27,w:32,h:26}}
+      title:{x:5,y:4.4,w:90,h:13.5},
+      sceneBadge:{x:6.5,y:5.0,size:11},
+      options:{a:{x:12,y:28,w:34,h:21},b:{x:54,y:28,w:34,h:21}}
     }
   };
 
@@ -526,17 +526,11 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
     ensureSceneExtras(scene);
     const title=scene.layout.title, badge=scene.layout.sceneBadge;
     const titleEl=$('#sceneTitle');
-    const titleRight=title.x+title.w;
-    const badgeRight=badge.x+badge.size;
-    const titleBottom=title.y+title.h;
-    const badgeBottom=badge.y+badge.size;
-    const overlapsTitleBand=badgeRight>title.x && badge.x<titleRight && badgeBottom>title.y && badge.y<titleBottom;
-    const safeGap=1.2;
-    const safeLeft=overlapsTitleBand?Math.max(title.x,badgeRight+safeGap):title.x;
-    const safeWidth=Math.max(8,titleRight-safeLeft);
-    titleEl.style.left=safeLeft+'%';
+    // A faixa branca mantém sua largura integral. O número da cena é apenas
+    // um badge sobreposto, nunca abre recorte nem desloca o título.
+    titleEl.style.left=title.x+'%';
     titleEl.style.top=title.y+'%';
-    titleEl.style.width=safeWidth+'%';
+    titleEl.style.width=title.w+'%';
     titleEl.style.height=title.h+'%';
     const nav=$('#quizSceneNav'), current=$('#quizSceneCurrent');
     nav.style.left=badge.x+'%'; nav.style.top=badge.y+'%';
@@ -670,7 +664,14 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
         case 'get_scene': {const idx=resolveSceneIndex(req.scene||activeScene+1); return {ok:true,data:compactScene(scenes[idx],idx)};}
         case 'set_scene': {const idx=resolveSceneIndex(req.scene||activeScene+1); return {ok:true,data:assignScene(idx,req.patch||{})};}
         case 'set_many': {
-          const results=[]; for(const op of (req.ops||[])){ if(op.op==='set_scene') results.push(assignScene(resolveSceneIndex(op.scene||activeScene+1),op.patch||{})); else if(op.op==='add_scene') results.push(insertScene(scenes.length-1,op.scene||op.patch||{})); else if(op.op==='move_scene') results.push(moveSceneTo(resolveSceneIndex(op.scene),op.to)); else if(op.op==='delete_scene') results.push(deleteSceneAt(resolveSceneIndex(op.scene))); }
+          const results=[]; for(const op of (req.ops||[])){
+            if(op.op==='set_scene') results.push(assignScene(resolveSceneIndex(op.scene||activeScene+1),op.patch||{}));
+            else if(op.op==='add_scene') results.push(insertScene(typeof op.after==='number'?resolveSceneIndex(op.after):scenes.length-1,op.scene_data||op.patch||op.data||{}));
+            else if(op.op==='duplicate_scene'){const idx=resolveSceneIndex(op.scene||activeScene+1);scenes.splice(idx+1,0,ensureSceneExtras(deepClone(scenes[idx])));dirty=true;results.push(compactScene(scenes[idx+1],idx+1));}
+            else if(op.op==='move_scene') results.push(moveSceneTo(resolveSceneIndex(op.scene),op.to));
+            else if(op.op==='delete_scene') results.push(deleteSceneAt(resolveSceneIndex(op.scene)));
+            else if(op.op==='set_active_scene'){const idx=resolveSceneIndex(op.scene||1);switchScene(idx);results.push({active_scene:activeScene+1});}
+          }
           return {ok:true,updated:results.length,data:{active_scene:activeScene+1,total_scenes:scenes.length,results}};
         }
         case 'add_scene': return {ok:true,data:insertScene(typeof req.after==='number'?resolveSceneIndex(req.after):scenes.length-1, req.scene||req.patch||{})};
@@ -720,10 +721,10 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
         <div class="settings-pane active" data-pane="mcp">
           <div class="settings-head"><div><div class="settings-eyebrow">MCP para ChatGPT</div><h2>Conectar ao GPT</h2><p>Use um endpoint MCP remoto dedicado a este app. A autenticação é Nenhuma.</p></div><button type="button" class="settings-close" aria-label="Fechar">×</button></div>
           <div class="settings-section soft">
-            <label class="settings-label" for="settingsMcpEndpoint">Endpoint MCP remoto</label>
-            <div class="endpoint-row"><input id="settingsMcpEndpoint" type="text" placeholder="https://seu-worker-ou-dominio.com/mcp" autocomplete="off"></div>
+            <span class="settings-label">Endpoint MCP remoto</span>
+            <div class="endpoint-row"><input id="settingsMcpEndpoint" type="text" readonly aria-readonly="true" value="Gerando endpoint MCP…"></div>
             <div class="settings-actions"><button type="button" class="mcp-primary" id="settingsCopyMcp">Copiar link MCP</button><button type="button" id="settingsCopyChatGPT">Copiar para ChatGPT</button></div>
-            <div class="settings-note">Cole aqui somente o endpoint criado especificamente para este projeto.</div>
+            <div class="settings-note" id="settingsMcpEndpointNote">O endpoint é gerado automaticamente por este app. Você só precisa copiá-lo para o plugin do GPT.</div>
           </div>
           <div class="settings-section">
             <span class="settings-label">Autenticação</span>
@@ -735,56 +736,181 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
           </div>
           <div class="settings-section">
             <span class="settings-label">Conexão MCP</span>
-            <div class="mcp-status-grid"><div><strong>Revogar ou substituir</strong><p>Ao revogar, este app esquece o endpoint atual. Depois basta informar um novo endpoint criado para a nova conexão.</p></div><button type="button" class="mcp-danger" id="settingsRevokeMcp">Revogar conexão</button></div>
+            <div class="mcp-status-grid"><div><strong>Revogar e gerar outro</strong><p>O endpoint atual é invalidado e um novo endpoint válido é criado imediatamente para substituir a conexão anterior.</p></div><button type="button" class="mcp-danger" id="settingsRevokeMcp">Revogar e gerar novo</button></div>
           </div>
         </div>
       </section>
     </div>`;
   document.body.appendChild(settingsDialog);
 
-  const MCP_STORAGE_KEY='corvo.quiz.mcp.endpoint';
-  const getSavedEndpoint=()=>{try{return localStorage.getItem(MCP_STORAGE_KEY)||''}catch{return ''}};
-  const saveEndpoint=value=>{try{value?localStorage.setItem(MCP_STORAGE_KEY,value):localStorage.removeItem(MCP_STORAGE_KEY)}catch{}};
+  const MCP_STORAGE_KEY='corvo.quiz.mcp.connection';
+  const MCP_CONNECTION_API='/api/mcp-connection';
+  const loadConnection=()=>{try{return JSON.parse(localStorage.getItem(MCP_STORAGE_KEY)||'null')}catch{return null}};
+  const saveConnection=value=>{try{value?localStorage.setItem(MCP_STORAGE_KEY,JSON.stringify(value)):localStorage.removeItem(MCP_STORAGE_KEY)}catch{}};
   const mcpEndpointInput=settingsDialog.querySelector('#settingsMcpEndpoint');
-  mcpEndpointInput.value=getSavedEndpoint();
-  function updateSettingsMcpStatus(){
-    const value=mcpEndpointInput.value.trim();
+  const mcpEndpointNote=settingsDialog.querySelector('#settingsMcpEndpointNote');
+  let mcpConnection=loadConnection();
+  let mcpConnectionBusy=false;
+
+  async function mcpApi(path='',options={}){
+    const res=await fetch(MCP_CONNECTION_API+(path||''),{headers:{'content-type':'application/json',...(options.headers||{})},...options});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok)throw Error(data.error||data.message||'Não foi possível atualizar a conexão MCP.');
+    return data;
+  }
+  function normalizeConnection(data){
+    const src=data?.connection||data;
+    if(!src||typeof src.endpoint!=='string'||!/^https?:\/\//i.test(src.endpoint))throw Error('O backend não retornou um endpoint MCP válido.');
+    return {
+      id:String(src.id||src.connection_id||src.client_id||''),
+      endpoint:src.endpoint,
+      client_id:String(src.client_id||src.id||''),
+      client_secret:String(src.client_secret||''),
+      created_at:src.created_at||new Date().toISOString()
+    };
+  }
+  function updateSettingsMcpStatus(message=''){
+    const value=mcpConnection?.endpoint||'';
     const label=settingsDialog.querySelector('#settingsMcpRouteLabel');
     const pill=settingsDialog.querySelector('#settingsMcpStatus');
-    if(value){label.textContent=value;pill.classList.remove('mcp-empty');pill.lastChild.textContent=' Conectado';}
-    else{label.textContent='Nenhuma conexão configurada';pill.classList.add('mcp-empty');pill.lastChild.textContent=' Não conectado';}
-    window.CorvoQuizMCP.endpoint=value;
+    mcpEndpointInput.value=value||(mcpConnectionBusy?'Gerando endpoint MCP…':'Endpoint indisponível');
+    mcpEndpointInput.title=value;
+    if(value){
+      label.textContent=value;
+      pill.classList.remove('mcp-empty');pill.lastChild.textContent=' Ativo';
+      mcpEndpointNote.textContent=message||'Endpoint ativo gerado automaticamente. Copie este endereço para o plugin do GPT.';
+      window.CorvoQuizMCP.endpoint=value;
+    }else{
+      label.textContent=mcpConnectionBusy?'Criando rota pública dedicada…':'Nenhum endpoint ativo';
+      pill.classList.add('mcp-empty');pill.lastChild.textContent=mcpConnectionBusy?' Gerando':' Indisponível';
+      mcpEndpointNote.textContent=message||(mcpConnectionBusy?'Aguarde enquanto o app cria a conexão.':'Este deploy ainda não possui o gerenciador MCP disponível.');
+      window.CorvoQuizMCP.endpoint='';
+    }
+    settingsDialog.querySelector('#settingsCopyMcp').disabled=!value||mcpConnectionBusy;
+    settingsDialog.querySelector('#settingsCopyChatGPT').disabled=!value||mcpConnectionBusy;
+    settingsDialog.querySelector('#settingsRevokeMcp').disabled=!value||mcpConnectionBusy;
   }
-  mcpEndpointInput.addEventListener('change',()=>{saveEndpoint(mcpEndpointInput.value.trim());updateSettingsMcpStatus();status('Endpoint MCP atualizado nas configurações.')});
-  mcpEndpointInput.addEventListener('input',updateSettingsMcpStatus);
+  async function ensureMcpConnection(force=false){
+    if(mcpConnectionBusy)return mcpConnection;
+    if(mcpConnection?.endpoint&&mcpConnection?.client_secret&&!force){updateSettingsMcpStatus();return mcpConnection;}
+    mcpConnectionBusy=true;updateSettingsMcpStatus();
+    try{
+      const data=await mcpApi('',{method:'POST',body:JSON.stringify({action:'create',schema:'corvo-quiz-app/v1',client_id:mcpConnection?.client_id||null,client_secret:mcpConnection?.client_secret||null})});
+      mcpConnection=normalizeConnection(data);saveConnection(mcpConnection);updateSettingsMcpStatus('Endpoint novo criado e ativo.');
+      return mcpConnection;
+    }catch(err){
+      mcpConnection=null;saveConnection(null);updateSettingsMcpStatus(err.message);return null;
+    }finally{mcpConnectionBusy=false;updateSettingsMcpStatus(mcpConnection?.endpoint?'Endpoint ativo gerado automaticamente. Copie este endereço para o plugin do GPT.':'Este deploy precisa disponibilizar '+MCP_CONNECTION_API+' para gerar endpoints MCP reais.');}
+  }
+  async function rotateMcpConnection(){
+    if(mcpConnectionBusy)return;
+    mcpConnectionBusy=true;updateSettingsMcpStatus('Revogando endpoint atual e gerando outro…');
+    const old=mcpConnection;
+    try{
+      const data=await mcpApi('',{method:'POST',body:JSON.stringify({action:'rotate',client_id:old?.client_id||old?.id||null,client_secret:old?.client_secret||null,schema:'corvo-quiz-app/v1'})});
+      mcpConnection=normalizeConnection(data);saveConnection(mcpConnection);
+      status('Endpoint MCP anterior revogado. Novo endpoint gerado.');
+      updateSettingsMcpStatus('Novo endpoint ativo. O endereço anterior não deve mais aceitar conexões.');
+    }catch(err){
+      mcpConnection=old;saveConnection(old);updateSettingsMcpStatus('Não foi possível rotacionar: '+err.message);status('Falha ao revogar/gerar endpoint MCP.');
+    }finally{mcpConnectionBusy=false;updateSettingsMcpStatus(mcpConnection?.endpoint?'Endpoint ativo gerado automaticamente. Copie este endereço para o plugin do GPT.':'Endpoint MCP indisponível.');}
+  }
   updateSettingsMcpStatus();
 
   const openSettings=pane=>{
     settingsDialog.querySelectorAll('[data-settings-pane]').forEach(b=>b.classList.toggle('active',b.dataset.settingsPane===pane));
     settingsDialog.querySelectorAll('[data-pane]').forEach(p=>p.classList.toggle('active',p.dataset.pane===pane));
     if(!settingsDialog.open)settingsDialog.showModal();
+    if(pane==='mcp')ensureMcpConnection();
   };
   $('#settingsBtn')?.addEventListener('click',()=>openSettings('mcp'));
   settingsDialog.querySelectorAll('.settings-close').forEach(b=>b.addEventListener('click',()=>settingsDialog.close()));
   settingsDialog.querySelectorAll('[data-settings-pane]').forEach(b=>b.addEventListener('click',()=>openSettings(b.dataset.settingsPane)));
   settingsDialog.addEventListener('click',e=>{if(e.target===settingsDialog)settingsDialog.close()});
   settingsDialog.querySelector('#settingsCopyMcp').addEventListener('click',async()=>{
-    const endpoint=mcpEndpointInput.value.trim(); if(!endpoint){status('Informe primeiro o endpoint MCP desta conexão.');return}
-    saveEndpoint(endpoint);updateSettingsMcpStatus();
+    const endpoint=mcpConnection?.endpoint; if(!endpoint){status('Nenhum endpoint MCP ativo.');return}
     try{await navigator.clipboard.writeText(endpoint);status('Link MCP copiado.')}catch{status('Não foi possível copiar automaticamente.')}
   });
   settingsDialog.querySelector('#settingsCopyChatGPT').addEventListener('click',async()=>{
-    const endpoint=mcpEndpointInput.value.trim(); if(!endpoint){status('Informe primeiro o endpoint MCP desta conexão.');return}
-    saveEndpoint(endpoint);updateSettingsMcpStatus();
+    const endpoint=mcpConnection?.endpoint; if(!endpoint){status('Nenhum endpoint MCP ativo.');return}
     const txt=`Endpoint MCP: ${endpoint}\nAutenticação: Nenhuma`;
     try{await navigator.clipboard.writeText(txt);status('Dados para conectar no ChatGPT copiados.')}catch{status('Não foi possível copiar automaticamente.')}
   });
-  settingsDialog.querySelector('#settingsRevokeMcp').addEventListener('click',()=>{
-    if(!mcpEndpointInput.value.trim()){status('Nenhuma conexão MCP está configurada.');return}
-    if(!confirm('Revogar esta conexão MCP neste app?'))return;
-    mcpEndpointInput.value='';saveEndpoint('');updateSettingsMcpStatus();status('Conexão MCP revogada. Informe um novo endpoint quando quiser reconectar.');
+  settingsDialog.querySelector('#settingsRevokeMcp').addEventListener('click',async()=>{
+    if(!mcpConnection?.endpoint){await ensureMcpConnection(true);return}
+    if(!confirm('Revogar o endpoint MCP atual e gerar um novo agora? O endereço atual deixará de ser válido.'))return;
+    await rotateMcpConnection();
   });
 
+  const MCP_SYNC_API='/api/mcp-sync';
+  let mcpSyncTimer=null,mcpHeartbeatTimer=null,mcpSyncBusy=false;
+  const fileToDataUrl=blob=>new Promise((resolve,reject)=>{const r=new FileReader();r.onerror=()=>reject(Error('Falha ao converter imagem remota.'));r.onload=()=>resolve(r.result);r.readAsDataURL(blob)});
+  async function fetchRemoteImage(url){
+    if(!/^https?:\/\//i.test(String(url||'')))throw Error('URL de imagem inválida.');
+    const c=mcpConnection;if(!c?.client_id||!c?.client_secret)throw Error('Conexão MCP local indisponível.');
+    const res=await fetch('/api/mcp-media?url='+encodeURIComponent(url),{headers:{'x-corvo-client':c.client_id,'x-corvo-secret':c.client_secret}});
+    if(!res.ok){const d=await res.json().catch(()=>({}));throw Error(d.error||'Falha ao baixar imagem remota.');}
+    return fileToDataUrl(await res.blob());
+  }
+  async function resolveRemotePatch(patch){
+    const out=deepClone(patch||{});
+    if(out.backgroundUrl){out.background=await fetchRemoteImage(out.backgroundUrl);delete out.backgroundUrl;}
+    if(out.clearBackground){out.background=null;delete out.clearBackground;}
+    for(const k of ['a','b'])if(out[k]){
+      if(out[k].imageUrl){out[k].image=await fetchRemoteImage(out[k].imageUrl);delete out[k].imageUrl;}
+      if(out[k].clearImage){out[k].image=null;delete out[k].clearImage;}
+    }
+    return out;
+  }
+  async function prepareRemoteRequest(req){
+    const out=deepClone(req||{});
+    if(out.op==='set_scene')out.patch=await resolveRemotePatch(out.patch);
+    if(out.op==='add_scene')out.scene=await resolveRemotePatch(out.scene||out.patch||{});
+    if(out.op==='set_many'&&Array.isArray(out.ops))for(const op of out.ops){
+      if(op.op==='set_scene')op.patch=await resolveRemotePatch(op.patch);
+      if(op.op==='add_scene')op.scene_data=await resolveRemotePatch(op.scene_data||op.patch||op.data||{});
+    }
+    return out;
+  }
+  async function syncApi(payload){
+    const c=mcpConnection;if(!c?.client_id||!c?.client_secret)return null;
+    const res=await fetch(MCP_SYNC_API,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...payload,client_id:c.client_id,client_secret:c.client_secret})});
+    const data=await res.json().catch(()=>({}));if(!res.ok)throw Error(data.error||'Falha na ponte MCP.');return data;
+  }
+  async function pushMcpSnapshot(){
+    try{await syncApi({action:'heartbeat',state:projectData(false)});}catch{}
+  }
+  async function pullMcpCommand(){
+    if(mcpSyncBusy||!mcpConnection?.client_secret)return;
+    mcpSyncBusy=true;
+    try{
+      const data=await syncApi({action:'pull'}),cmd=data?.command;
+      if(!cmd?.id||!cmd?.request)return;
+      let result;
+      try{result=await window.CorvoQuizMCP.handle(await prepareRemoteRequest(cmd.request));}
+      catch(err){result={ok:false,error:err?.message||'Falha ao aplicar comando remoto.'};}
+      await syncApi({action:'ack',command_id:cmd.id,result});
+      await pushMcpSnapshot();
+      if(result?.ok)status('MCP atualizou o projeto.');
+    }catch{}finally{mcpSyncBusy=false;}
+  }
+  function stopMcpSync(){if(mcpSyncTimer)clearInterval(mcpSyncTimer);if(mcpHeartbeatTimer)clearInterval(mcpHeartbeatTimer);mcpSyncTimer=mcpHeartbeatTimer=null;}
+  function startMcpSync(){
+    stopMcpSync();if(!mcpConnection?.client_secret)return;
+    pushMcpSnapshot();pullMcpCommand();
+    mcpSyncTimer=setInterval(pullMcpCommand,900);
+    mcpHeartbeatTimer=setInterval(pushMcpSnapshot,3000);
+  }
+  const originalEnsureMcpConnection=ensureMcpConnection;
+  ensureMcpConnection=async function(force=false){const c=await originalEnsureMcpConnection(force);if(c?.client_secret)startMcpSync();return c;};
+  const originalRotateMcpConnection=rotateMcpConnection;
+  rotateMcpConnection=async function(){const r=await originalRotateMcpConnection();startMcpSync();return r;};
+  if(mcpConnection?.client_secret)startMcpSync();
+
+  window.CorvoQuizMCP.connectionApi=MCP_CONNECTION_API;
+  window.CorvoQuizMCP.ensureConnection=ensureMcpConnection;
+  window.CorvoQuizMCP.rotateConnection=rotateMcpConnection;
+  window.CorvoQuizMCP.syncApi=MCP_SYNC_API;
 
 
   render();
