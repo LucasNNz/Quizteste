@@ -244,49 +244,125 @@ function sceneMetrics(){
   const baseFixedDuringAnimation=state.motion==='zoom-alternado'?animationBaseDrift<=1:true;
   options[k]={card,badge,style,current,blocked,margin,radius:Math.round(parseFloat(style.borderTopLeftRadius)*sx),cx:blocked.x+blocked.w/2,cy:blocked.y+blocked.h/2,base:blocked.y+blocked.h,cardBase,left:current.x,right:current.x+current.w,width:current.w,animationBaseMin,animationBaseMax,animationBaseDrift,baseFixedDuringAnimation,transformOrigin:style.transformOrigin};
  }
- return {format,canvasW,canvasH,range,expand,fmt,titleBox,titleMargin,options};
+ return {format,canvasW,canvasH,sx,sy,range,expand,fmt,titleBox,titleMargin,options};
 }
 function backgroundMotionReport(m){
- const bg=$('.backdrop'),style=getComputedStyle(bg),animations=bg.getAnimations();
- const animation=animations.find(a=>a.effect?.target===bg);
- let minScale=1,maxScale=1,duration=0,easing='linear',type='sem animação',minX=0,maxX=0,minY=0,maxY=0;
+ const bg=$('.backdrop');
+ const fmt=m.fmt;
+ const finite=(v,fallback=0)=>Number.isFinite(Number(v))?Number(v):fallback;
  const matrixValues=transform=>{
   if(!transform||transform==='none')return {sx:1,sy:1,tx:0,ty:0};
   try{
-   const dm=new DOMMatrixReadOnly(transform);
-   return {sx:Math.hypot(dm.a,dm.b),sy:Math.hypot(dm.c,dm.d),tx:dm.e,ty:dm.f};
-  }catch{return {sx:1,sy:1,tx:0,ty:0}}
- };
- if(animation){
-  const timing=animation.effect.getTiming();duration=Number(timing.duration)||0;easing=timing.easing||'linear';
-  const frames=animation.effect.getKeyframes();
-  const values=frames.map(f=>matrixValues(f.transform));
-  if(values.length){
-   minScale=Math.min(...values.map(v=>(v.sx+v.sy)/2));
-   maxScale=Math.max(...values.map(v=>(v.sx+v.sy)/2));
-   minX=Math.min(...values.map(v=>v.tx));maxX=Math.max(...values.map(v=>v.tx));
-   minY=Math.min(...values.map(v=>v.ty));maxY=Math.max(...values.map(v=>v.ty));
+   if(typeof DOMMatrixReadOnly!=='undefined'){
+    const dm=new DOMMatrixReadOnly(transform);
+    const out={sx:Math.hypot(dm.a,dm.b),sy:Math.hypot(dm.c,dm.d),tx:dm.e,ty:dm.f};
+    return {sx:finite(out.sx,1),sy:finite(out.sy,1),tx:finite(out.tx,0),ty:finite(out.ty,0)};
+   }
+  }catch{}
+  const nums=String(transform).match(/-?\d*\.?\d+(?:e[-+]?\d+)?/ig)?.map(Number)||[];
+  if(String(transform).startsWith('matrix3d')&&nums.length>=16){
+   return {sx:finite(Math.hypot(nums[0],nums[1],nums[2]),1),sy:finite(Math.hypot(nums[4],nums[5],nums[6]),1),tx:finite(nums[12],0),ty:finite(nums[13],0)};
   }
-  const name=(animation.animationName||'').toLowerCase();
-  type=name.includes('breathe')?'camera breathing / zoom suave':name.includes('pulse')?'zoom pulse':(animation.animationName||'animação CSS');
+  if(String(transform).startsWith('matrix')&&nums.length>=6){
+   return {sx:finite(Math.hypot(nums[0],nums[1]),1),sy:finite(Math.hypot(nums[2],nums[3]),1),tx:finite(nums[4],0),ty:finite(nums[5],0)};
+  }
+  const scale=String(transform).match(/scale(?:3d|X|Y)?\(([^)]+)\)/i);
+  if(scale){
+   const vals=scale[1].split(',').map(v=>finite(parseFloat(v),1));
+   return {sx:vals[0]||1,sy:vals[1]||vals[0]||1,tx:0,ty:0};
+  }
+  return {sx:1,sy:1,tx:0,ty:0};
+ };
+ const animation=bg.getAnimations().find(a=>a.effect?.target===bg);
+ if(!animation){
+  return [
+   '==================================================','MOVIMENTO DO FUNDO / CÂMERA','==================================================','',
+   'MOVIMENTO_FUNDO = false','',
+   'O fundo está estático no layout atual.','Não existe animação de câmera/fundo ativa nesta cena.','',
+   'Os cartões permanecem fixos à tela.','A linha canônica de integração e o scaffold correspondem diretamente ao fundo estático.'
+  ];
  }
- const originParts=style.transformOrigin.split(' '),cssOX=parseFloat(originParts[0])||m.canvasW/(2*m.sx),cssOY=parseFloat(originParts[1])||m.canvasH/(2*m.sy);
- const originX=cssOX*m.sx,originY=cssOY*m.sy;
- const current=matrixValues(style.transform),referenceScale=1;
- const fmt=m.fmt;
+ const timing=animation.effect.getTiming();
+ const duration=finite(timing.duration,0);
+ if(duration<=0){
+  return [
+   '==================================================','MOVIMENTO DO FUNDO / CÂMERA','==================================================','',
+   'MOVIMENTO_FUNDO = false','',
+   'O fundo está estático no layout atual.','A animação existente não possui duração efetiva.','',
+   'Os cartões permanecem fixos à tela.','A linha canônica de integração e o scaffold correspondem diretamente ao fundo estático.'
+  ];
+ }
+ const originalTime=animation.currentTime,originalPlay=animation.playState;
+ const sampleOffsets=[0,.125,.25,.375,.5,.625,.75,.875,1];
+ const samples=[];
+ let reference={sx:1,sy:1,tx:0,ty:0};
+ let instant={sx:1,sy:1,tx:0,ty:0};
+ try{
+  instant=matrixValues(getComputedStyle(bg).transform);
+  animation.pause();
+  for(const offset of sampleOffsets){
+   animation.currentTime=(finite(timing.delay,0))+(duration*offset);
+   const value=matrixValues(getComputedStyle(bg).transform);
+   samples.push(value);
+   if(offset===0)reference=value;
+  }
+ }finally{
+  try{animation.currentTime=originalTime}catch{}
+  if(originalPlay==='running'){try{animation.play()}catch{}}
+ }
+ const scales=samples.map(v=>(finite(v.sx,1)+finite(v.sy,1))/2).filter(Number.isFinite);
+ const txs=samples.map(v=>finite(v.tx,0)).filter(Number.isFinite);
+ const tys=samples.map(v=>finite(v.ty,0)).filter(Number.isFinite);
+ const minScale=scales.length?Math.min(...scales):1;
+ const maxScale=scales.length?Math.max(...scales):1;
+ const minX=txs.length?Math.min(...txs):0,maxX=txs.length?Math.max(...txs):0;
+ const minY=tys.length?Math.min(...tys):0,maxY=tys.length?Math.max(...tys):0;
+ const scaleDelta=Math.abs(maxScale-minScale);
+ const translationDelta=Math.max(Math.abs(maxX-minX),Math.abs(maxY-minY));
+ const movementActive=scaleDelta>0.0005||translationDelta>0.05;
+ if(!movementActive){
+  return [
+   '==================================================','MOVIMENTO DO FUNDO / CÂMERA','==================================================','',
+   'MOVIMENTO_FUNDO = false','',
+   'O fundo está estático no layout atual.','A animação CSS não produz deslocamento ou escala visual mensurável.','',
+   'Os cartões permanecem fixos à tela.','A linha canônica de integração e o scaffold correspondem diretamente ao fundo estático.'
+  ];
+ }
+ const liveStyle=getComputedStyle(bg);
+ const bgRect=bg.getBoundingClientRect();
+ const unscaledW=Math.max(1,bg.offsetWidth||bgRect.width||1),unscaledH=Math.max(1,bg.offsetHeight||bgRect.height||1);
+ const parseOrigin=(token,size,fallback)=>{
+  const raw=String(token||'').trim().toLowerCase();
+  if(raw.endsWith('%'))return finite(parseFloat(raw),50)/100*size;
+  if(raw==='left'||raw==='top')return 0;
+  if(raw==='center')return size/2;
+  if(raw==='right'||raw==='bottom')return size;
+  if(raw.endsWith('px'))return finite(parseFloat(raw),fallback);
+  const n=parseFloat(raw);return Number.isFinite(n)?n:fallback;
+ };
+ const originParts=String(liveStyle.transformOrigin||'50% 50%').trim().split(/\s+/);
+ const cssOX=parseOrigin(originParts[0],unscaledW,unscaledW/2);
+ const cssOY=parseOrigin(originParts[1]||originParts[0],unscaledH,unscaledH/2);
+ const originX=finite(cssOX*m.sx,m.canvasW/2),originY=finite(cssOY*m.sy,m.canvasH/2);
+ const name=(animation.animationName||'').toLowerCase();
+ const type=name.includes('breathe')?'camera breathing / zoom suave':name.includes('pulse')?'zoom pulse':(animation.animationName||'animação CSS');
+ const easing=(liveStyle.animationTimingFunction||timing.easing||'linear').split(',')[0].trim()||'linear';
+ const currentScale=(finite(instant.sx,1)+finite(instant.sy,1))/2;
+ const referenceScale=(finite(reference.sx,1)+finite(reference.sy,1))/2;
  return [
   '==================================================','MOVIMENTO DO FUNDO / CÂMERA','==================================================','',
+  'MOVIMENTO_FUNDO = true','',
   'O fundo possui animação independente dos cartões.','',
   'Tipo de movimento:',type,'',
   'Escala mínima:',fmt(minScale),'',
   'Escala máxima:',fmt(maxScale),'',
   'Escala no frame de referência:',fmt(referenceScale),
-  `(Escala instantânea no momento da exportação: ${fmt((current.sx+current.sy)/2)})`,'',
+  `(Escala instantânea no momento da exportação: ${fmt(currentScale)})`,'',
   'Origem da transformação:',
   `X = ${fmt(originX)} px`,
   `Y = ${fmt(originY)} px`,
   `equivalente em porcentagem: ${fmt(originX/m.canvasW*100)}% / ${fmt(originY/m.canvasH*100)}%`,'',
-  'Duração do ciclo:',duration?`${fmt(duration/1000)} s`:'0.0 s','',
+  'Duração do ciclo:',`${fmt(duration/1000)} s`,'',
   'Easing:',easing,'',
   'Deslocamento horizontal adicional:',
   `mínimo X = ${fmt(minX*m.sx)} px`,
@@ -300,7 +376,7 @@ function backgroundMotionReport(m){
   'nos cartões devem considerar o deslocamento causado pela animação',
   'do fundo.','',
   'A linha canônica de integração e o scaffold representam o frame-base',
-  'sem transformação do fundo (escala 1.000).'
+  `com escala de referência ${fmt(referenceScale)}.`
  ];
 }
 function coordinateReport(){
