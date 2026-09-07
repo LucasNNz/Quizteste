@@ -1872,6 +1872,537 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
   setTimeout(()=>detectLibraryHost(),50);
 
 
+  /* ===== Drag on canvas + scene preset manager ===== */
+  const extraUiStyle=document.createElement('style');
+  extraUiStyle.textContent=`
+    .drag-enabled-card,.drag-enabled-overlay{touch-action:none}
+    .drag-enabled-card{cursor:grab}
+    .drag-enabled-overlay{pointer-events:auto;cursor:grab}
+    .dragging-layout .drag-enabled-card,.dragging-layout .drag-enabled-overlay{cursor:grabbing}
+    .dragging-layout .card,.dragging-layout .overlay-asset{animation-play-state:paused!important}
+    .preset-manager .preset-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+    .preset-manager .preset-row button{width:100%;margin:0}
+    .preset-manager select,.preset-manager input[type=text]{width:100%}
+    .preset-manager .preset-help{margin-top:10px}
+    @media(max-width:760px){.preset-manager .preset-row{grid-template-columns:1fr}}
+  `;
+  document.head.appendChild(extraUiStyle);
+
+  function buildPlacementFromScene(scene=state){
+    ensureSceneExtras(scene);
+    const canvas=sceneCanvas(scene.format);
+    const placement={referenceWidth:canvas.w,referenceHeight:canvas.h,overlays:[null,null,null]};
+    for(const k of OPTION_KEYS){
+      if(scene?.[k]?.visible===false)continue;
+      const box=scene.layout?.options?.[k];
+      if(!box)continue;
+      const w=canvas.w*(Number(box.w)||0)/100;
+      const h=canvas.h*(Number(box.h)||0)/100;
+      placement[k]={centerX:Math.round(canvas.w*(Number(box.x)||0)/100+w/2),baseY:Math.round(canvas.h*(Number(box.y)||0)/100+h)};
+    }
+    (scene.overlays||[]).forEach((slot,i)=>{
+      if(!slot)return;
+      const hasAsset=!!(slot.image||slot.imageUrl||slot.assetId);
+      if(!hasAsset)return;
+      placement.overlays[i]={centerPct:num(slot.x,1),basePct:num(slot.y,1),scale:Math.round(Number(slot.scale)||0),depth:slot.depth||'under',name:(slot.name||('Camada '+(i+1))).slice(0,40)};
+    });
+    return placement;
+  }
+  function syncPlacementTextareaFromState(force=false){
+    const input=$('#placementInput');
+    if(!input)return;
+    if(!force&&document.activeElement===input)return;
+    try{input.value=placementToText(buildPlacementFromScene(state));}catch{}
+  }
+
+  const presetStorageKey='corvo-scene-presets-v1';
+  function readPresetLibrary(){
+    try{const raw=localStorage.getItem(presetStorageKey);const list=raw?JSON.parse(raw):[];return Array.isArray(list)?list:[]}catch{return[]}
+  }
+  function writePresetLibrary(list){
+    try{localStorage.setItem(presetStorageKey,JSON.stringify(list.slice(0,200)))}catch{}
+  }
+  function sanitizePresetName(name,fallback='Preset sem nome'){
+    const clean=String(name||'').trim().replace(/\s+/g,' ').slice(0,80);
+    return clean||fallback;
+  }
+  function makePresetRecord(name,sceneObj){
+    const sceneData=ensureSceneExtras(deepClone(sceneObj||state));
+    return {kind:'corvo-scene-preset',version:1,id:'preset-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8),name:sanitizePresetName(name,sceneData.title||'Preset'),createdAt:new Date().toISOString(),scene:sceneData};
+  }
+  function validatePresetRecord(record){
+    if(!record||typeof record!=='object')throw Error('Preset inválido');
+    const sceneCandidate=record.scene&&typeof record.scene==='object'?record.scene:record;
+    const scene=validateScene(sceneCandidate);
+    return {kind:'corvo-scene-preset',version:1,id:String(record.id||('preset-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8))),name:sanitizePresetName(record.name||scene.title||'Preset'),createdAt:record.createdAt||new Date().toISOString(),scene};
+  }
+  function normalizeImportedPresets(payload){
+    if(Array.isArray(payload))return payload.map(validatePresetRecord);
+    if(payload&&Array.isArray(payload.presets))return payload.presets.map(validatePresetRecord);
+    return [validatePresetRecord(payload)];
+  }
+  function findPresetById(id){return readPresetLibrary().find(x=>x.id===id)||null}
+  function upsertPreset(record){
+    const list=readPresetLibrary();
+    const idx=list.findIndex(x=>x.id===record.id||x.name===record.name);
+    if(idx>=0)list[idx]=record; else list.unshift(record);
+    writePresetLibrary(list);
+    return record;
+  }
+  function downloadJson(filename,data){
+    const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+    const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+  function applyPresetScene(record,{createNew=false}={}){
+    const fresh=validateScene(deepClone(record.scene));
+    if(createNew){
+      scenes.splice(activeScene+1,0,fresh); dirty=true; switchScene(activeScene+1); status('Nova cena criada a partir do preset "'+record.name+'".');
+    }else{
+      scenes[activeScene]=fresh; state=scenes[activeScene]; dirty=true; render(); status('Preset "'+record.name+'" aplicado na cena atual.');
+    }
+  }
+
+  const panel=$('.panel');
+  const presetWrap=document.createElement('div');
+  presetWrap.className='option preset-manager';
+  presetWrap.innerHTML=`
+    <div class="option-head"><b>Presets de cena</b></div>
+    <label class="field"><span>Nome do preset</span><input type="text" id="scenePresetName" maxlength="80" placeholder="Ex.: Verdadeiro ou falso — neon"></label>
+    <div class="preset-row"><button id="saveScenePreset">Salvar preset atual</button><button id="downloadCurrentPreset">Baixar preset atual</button></div>
+    <label class="field"><span>Biblioteca local de presets</span><select id="scenePresetSelect"><option value="">Nenhum preset salvo</option></select></label>
+    <div class="preset-row"><button id="applyScenePreset">Aplicar na cena atual</button><button id="createSceneFromPreset">Nova cena com preset</button></div>
+    <div class="preset-row"><button id="downloadScenePreset">Baixar preset selecionado</button><button id="deleteScenePreset">Excluir preset</button></div>
+    <div class="preset-row"><button id="importScenePreset">Importar preset</button><button id="downloadPresetPack">Baixar biblioteca</button></div>
+    <p class="small preset-help">O preset salva a cena inteira: formato, PNG de fundo, opções, cores, animações, efeitos, layout e camadas PNG extras.</p>
+    <p class="small preset-help">Arraste os cards e as camadas PNG direto na prévia. As coordenadas do campo acima são atualizadas automaticamente para você reutilizar depois.</p>
+  `;
+  if(panel){panel.appendChild(presetWrap)}
+  const presetFileInput=document.createElement('input');
+  presetFileInput.type='file'; presetFileInput.accept='.json,application/json'; presetFileInput.multiple=true; presetFileInput.hidden=true; presetFileInput.id='scenePresetFile';
+  document.body.appendChild(presetFileInput);
+
+  function renderPresetManager(){
+    const select=$('#scenePresetSelect'),nameInput=$('#scenePresetName'); if(!select||!nameInput)return;
+    const list=readPresetLibrary(); const currentId=select.value;
+    select.replaceChildren();
+    if(!list.length){select.append(new Option('Nenhum preset salvo',''));}
+    else for(const item of list){select.append(new Option(item.name,item.id));}
+    if(list.some(x=>x.id===currentId))select.value=currentId;
+    else if(list.length)select.value=list[0].id;
+    if(!nameInput.value.trim())nameInput.value=sanitizePresetName(state.title||'Meu preset');
+    const hasSelection=!!select.value&&list.some(x=>x.id===select.value);
+    ['applyScenePreset','createSceneFromPreset','downloadScenePreset','deleteScenePreset'].forEach(id=>{const el=$('#'+id);if(el)el.disabled=!hasSelection});
+    const packBtn=$('#downloadPresetPack'); if(packBtn)packBtn.disabled=!list.length;
+  }
+  $('#saveScenePreset')?.addEventListener('click',()=>{
+    const name=sanitizePresetName($('#scenePresetName')?.value||state.title||'Preset');
+    const record=makePresetRecord(name,state); upsertPreset(record); renderPresetManager(); $('#scenePresetSelect').value=record.id; status('Preset "'+record.name+'" salvo na biblioteca local.');
+  });
+  $('#downloadCurrentPreset')?.addEventListener('click',()=>{
+    const name=sanitizePresetName($('#scenePresetName')?.value||state.title||'preset');
+    const record=makePresetRecord(name,state); downloadJson(name.toLowerCase().replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'')+'.json',record); status('Preset atual baixado.');
+  });
+  $('#applyScenePreset')?.addEventListener('click',()=>{const record=findPresetById($('#scenePresetSelect')?.value); if(!record)return; applyPresetScene(record,{createNew:false}); syncPlacementTextareaFromState(true); renderPresetManager();});
+  $('#createSceneFromPreset')?.addEventListener('click',()=>{const record=findPresetById($('#scenePresetSelect')?.value); if(!record)return; applyPresetScene(record,{createNew:true}); syncPlacementTextareaFromState(true); renderPresetManager();});
+  $('#downloadScenePreset')?.addEventListener('click',()=>{const record=findPresetById($('#scenePresetSelect')?.value); if(!record)return; downloadJson(record.name.toLowerCase().replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'')+'.json',record); status('Preset selecionado baixado.');});
+  $('#deleteScenePreset')?.addEventListener('click',()=>{
+    const select=$('#scenePresetSelect'); const id=select?.value; if(!id)return;
+    const list=readPresetLibrary(); const record=list.find(x=>x.id===id); if(!record)return;
+    if(!confirm('Excluir o preset "'+record.name+'" da biblioteca local?'))return;
+    writePresetLibrary(list.filter(x=>x.id!==id)); renderPresetManager(); status('Preset excluído da biblioteca local.');
+  });
+  $('#importScenePreset')?.addEventListener('click',()=>{presetFileInput.value=''; presetFileInput.click()});
+  $('#downloadPresetPack')?.addEventListener('click',()=>{
+    const list=readPresetLibrary(); if(!list.length)return; downloadJson('corvo-scene-presets.json',{kind:'corvo-scene-preset-pack',version:1,presets:list}); status('Biblioteca de presets baixada.');
+  });
+  presetFileInput.addEventListener('change',async e=>{
+    const files=Array.from(e.target.files||[]); if(!files.length)return;
+    try{
+      let imported=[];
+      for(const file of files){const parsed=JSON.parse(await file.text()); imported=imported.concat(normalizeImportedPresets(parsed));}
+      let list=readPresetLibrary();
+      for(const record of imported){const idx=list.findIndex(x=>x.id===record.id||x.name===record.name); if(idx>=0)list[idx]=record; else list.unshift(record);}
+      writePresetLibrary(list); renderPresetManager(); status(imported.length+' preset(s) importado(s).');
+    }catch(err){console.error(err); status('Não foi possível importar o preset. Use um JSON exportado por este editor.');}
+  });
+
+  const dragState={active:null};
+  function stopDrag(commit=true){
+    if(!dragState.active)return;
+    const el=dragState.active.el;
+    try{el.releasePointerCapture?.(dragState.active.pointerId)}catch{}
+    if(dragState.active.dragging&&el?.classList.contains('card'))el.dataset.suppressClick='1';
+    document.body.classList.remove('dragging-layout');
+    if(commit&&dragState.active.dragging){markDirty(); syncPlacementTextareaFromState(true); const label=dragState.active.kind==='overlay'?'PNG '+(dragState.active.index+1):'opção '+dragState.active.key.toUpperCase(); status('Posição atualizada para '+label+'.');}
+    dragState.active=null;
+  }
+  function pointerInScenePct(e){
+    const scene=$('#scene'); const r=scene.getBoundingClientRect();
+    return {x:((e.clientX-r.left)/r.width)*100,y:((e.clientY-r.top)/r.height)*100};
+  }
+  function clampBoxPosition(box,newAnchorX,newAnchorY){
+    box.x=clamp(newAnchorX-Number(box.w)/2,0,Math.max(0,100-Number(box.w)),box.x);
+    box.y=clamp(newAnchorY-Number(box.h),0,Math.max(0,100-Number(box.h)),box.y);
+  }
+  function startDrag(kind,payload,e){
+    if(document.body.classList.contains('presenting'))return;
+    const pt=pointerInScenePct(e);
+    const base={kind,pointerId:e.pointerId,el:e.currentTarget,startPointer:pt,lastPointer:pt,dragging:false};
+    if(kind==='card'){
+      const key=payload.key; ensureSceneExtras(state); const box=state.layout?.options?.[key]; if(!box||state?.[key]?.visible===false)return;
+      dragState.active={...base,key,offsetX:pt.x-(Number(box.x)+Number(box.w)/2),offsetY:pt.y-(Number(box.y)+Number(box.h))};
+    }else if(kind==='overlay'){
+      const index=payload.index; ensureSceneExtras(state); const slot=state.overlays?.[index]; if(!slot||!(slot.image||slot.imageUrl||slot.assetId))return;
+      dragState.active={...base,index,offsetX:pt.x-Number(slot.x),offsetY:pt.y-Number(slot.y)};
+    }else return;
+    try{e.currentTarget.setPointerCapture?.(e.pointerId)}catch{}
+  }
+  function onDragMove(e){
+    const current=dragState.active; if(!current||e.pointerId!==current.pointerId)return;
+    const pt=pointerInScenePct(e); current.lastPointer=pt;
+    const moved=Math.hypot(pt.x-current.startPointer.x,pt.y-current.startPointer.y);
+    if(!current.dragging&&moved<0.8)return;
+    if(!current.dragging){current.dragging=true;document.body.classList.add('dragging-layout');}
+    if(current.kind==='card'){
+      const box=state.layout.options[current.key];
+      clampBoxPosition(box,pt.x-current.offsetX,pt.y-current.offsetY);
+      state.optionLayoutMode='manual'; state.layoutFormat=state.format;
+    }else if(current.kind==='overlay'){
+      const slot=state.overlays[current.index];
+      slot.x=clamp(pt.x-current.offsetX,OVERLAY_POSITION_MIN,OVERLAY_POSITION_MAX,slot.x);
+      slot.y=clamp(pt.y-current.offsetY,OVERLAY_POSITION_MIN,OVERLAY_POSITION_MAX,slot.y);
+    }
+    render(); syncPlacementTextareaFromState(true); e.preventDefault();
+  }
+  function onDragEnd(e){if(!dragState.active||e.pointerId!==dragState.active.pointerId)return; stopDrag(true)}
+  document.addEventListener('pointermove',onDragMove,{passive:false});
+  document.addEventListener('pointerup',onDragEnd);
+  document.addEventListener('pointercancel',onDragEnd);
+  function bindDraggableSceneElements(){
+    OPTION_KEYS.forEach(k=>{
+      const el=document.querySelector('.card.'+k); if(!el||el.dataset.dragReady==='1')return;
+      el.dataset.dragReady='1'; el.classList.add('drag-enabled-card');
+      el.addEventListener('pointerdown',e=>startDrag('card',{key:k},e));
+      el.addEventListener('click',e=>{if(el.dataset.suppressClick==='1'){e.preventDefault();e.stopImmediatePropagation();el.dataset.suppressClick='';}},true);
+    });
+    [0,1,2].forEach(i=>{
+      const el=$('#overlay-'+(i+1)); if(!el||el.dataset.dragReady==='1')return;
+      el.dataset.dragReady='1'; el.classList.add('drag-enabled-overlay');
+      el.addEventListener('pointerdown',e=>startDrag('overlay',{index:i},e));
+    });
+  }
+
+  const presetAndDragRender=render;
+  render=function(){
+    presetAndDragRender();
+    bindDraggableSceneElements();
+    renderPresetManager();
+    syncPlacementTextareaFromState(false);
+  };
+
+
+  /* ===== Card rotation / tilt / scale + richer coordinate TXT ===== */
+  const CARD_SCALE_MIN=60,CARD_SCALE_MAX=150,CARD_TILT_MIN=-35,CARD_TILT_MAX=35,CARD_TILT_STEP=4;
+  const cardFxStyle=document.createElement('style');
+  cardFxStyle.textContent=`
+    .scene .card{
+      --card-scale:1;
+      --tilt-x:0deg;
+      --tilt-y:0deg;
+      transform-origin:center bottom;
+      transform:translateY(0) perspective(1200px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y)) scale(var(--card-scale));
+      will-change:transform;
+    }
+    .scene.subtle .card{animation-name:corvoCardFloatCompositeSmall!important}
+    .scene.normal .card,.scene.zoom-alternado .card,.scene.pulso-suave .card,.scene.still .card{animation-name:corvoCardFloatComposite!important}
+    @keyframes corvoCardFloatComposite{
+      0%,100%{transform:translateY(0) perspective(1200px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y)) scale(var(--card-scale));}
+      50%{transform:translateY(-.7cqw) perspective(1200px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y)) scale(var(--card-scale));}
+    }
+    @keyframes corvoCardFloatCompositeSmall{
+      0%,100%{transform:translateY(0) perspective(1200px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y)) scale(var(--card-scale));}
+      50%{transform:translateY(-.3cqw) perspective(1200px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y)) scale(var(--card-scale));}
+    }
+    .card-fx-ui{border-top:1px dashed #334052;margin-top:12px;padding-top:12px}
+    .card-fx-ui .fx-readout{display:block;margin-top:5px;font-size:12px;color:#90a3ba}
+    .card-fx-ui .preset-row button{padding:8px 10px}
+    .card-fx-ui .preset-row{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:8px}
+    .card-fx-ui .preset-row.two{grid-template-columns:repeat(2,1fr)}
+    @media(max-width:760px){.card-fx-ui .preset-row{grid-template-columns:repeat(2,1fr)}}
+  `;
+  document.head.appendChild(cardFxStyle);
+
+  const baseEnsureSceneExtrasCardFx=ensureSceneExtras;
+  ensureSceneExtras=function(scene){
+    scene=baseEnsureSceneExtrasCardFx(scene);
+    if(!scene||typeof scene!=='object')return scene;
+    for(const k of OPTION_KEYS){
+      scene[k]=scene[k]&&typeof scene[k]==='object'?scene[k]:optionDefault(k);
+      scene[k].cardScale=clamp(scene[k].cardScale,CARD_SCALE_MIN,CARD_SCALE_MAX,100);
+      scene[k].tiltX=clamp(scene[k].tiltX,CARD_TILT_MIN,CARD_TILT_MAX,0);
+      scene[k].tiltY=clamp(scene[k].tiltY,CARD_TILT_MIN,CARD_TILT_MAX,0);
+    }
+    return scene;
+  };
+  ensureSceneExtras(state); scenes.forEach(ensureSceneExtras);
+
+  function injectCardFxControls(){
+    for(const k of OPTION_KEYS){
+      const host=$('#label-'+k)?.closest('.option');
+      if(!host||host.querySelector('.card-fx-ui'))continue;
+      const wrap=document.createElement('div');
+      wrap.className='card-fx-ui';
+      wrap.innerHTML=`
+        <label class="field"><span>Escala do card</span><input type="range" min="${CARD_SCALE_MIN}" max="${CARD_SCALE_MAX}" step="1" value="100" data-card-scale="${k}"><small class="fx-readout" id="card-scale-value-${k}">100%</small></label>
+        <label class="field"><span>Inclinação direita / esquerda</span><input type="range" min="${CARD_TILT_MIN}" max="${CARD_TILT_MAX}" step="1" value="0" data-card-tilt-y="${k}"><small class="fx-readout" id="card-tilt-y-value-${k}">0°</small></label>
+        <label class="field"><span>Inclinação cima / baixo</span><input type="range" min="${CARD_TILT_MIN}" max="${CARD_TILT_MAX}" step="1" value="0" data-card-tilt-x="${k}"><small class="fx-readout" id="card-tilt-x-value-${k}">0°</small></label>
+        <div class="preset-row">
+          <button type="button" data-card-action="${k}:left">↶ Esquerda</button>
+          <button type="button" data-card-action="${k}:up">↥ Cima</button>
+          <button type="button" data-card-action="${k}:right">↷ Direita</button>
+        </div>
+        <div class="preset-row two">
+          <button type="button" data-card-action="${k}:down">↧ Baixo</button>
+          <button type="button" data-card-action="${k}:reset">Resetar card</button>
+        </div>`;
+      host.appendChild(wrap);
+    }
+  }
+  injectCardFxControls();
+
+  function updateCardFxReadout(k){
+    const opt=state?.[k]||{};
+    const scaleEl=$('#card-scale-value-'+k),xEl=$('#card-tilt-x-value-'+k),yEl=$('#card-tilt-y-value-'+k);
+    if(scaleEl)scaleEl.textContent=Math.round(Number(opt.cardScale)||100)+'%';
+    if(xEl)xEl.textContent=(Number(opt.tiltX)||0)+'°';
+    if(yEl)yEl.textContent=(Number(opt.tiltY)||0)+'°';
+  }
+  function syncCardFxControls(scene=state){
+    ensureSceneExtras(scene);
+    for(const k of OPTION_KEYS){
+      const opt=scene[k]||{};
+      const scaleInp=document.querySelector(`[data-card-scale="${k}"]`);
+      const tiltXInp=document.querySelector(`[data-card-tilt-x="${k}"]`);
+      const tiltYInp=document.querySelector(`[data-card-tilt-y="${k}"]`);
+      if(scaleInp)scaleInp.value=String(Math.round(Number(opt.cardScale)||100));
+      if(tiltXInp)tiltXInp.value=String(Math.round(Number(opt.tiltX)||0));
+      if(tiltYInp)tiltYInp.value=String(Math.round(Number(opt.tiltY)||0));
+      updateCardFxReadout(k);
+    }
+  }
+  function applyCardFxToDom(scene=state){
+    ensureSceneExtras(scene);
+    for(const k of OPTION_KEYS){
+      const card=document.querySelector('.card.'+k); if(!card)continue;
+      card.style.setProperty('--card-scale',(Number(scene[k]?.cardScale)||100)/100);
+      card.style.setProperty('--tilt-x',(Number(scene[k]?.tiltX)||0)+'deg');
+      card.style.setProperty('--tilt-y',(Number(scene[k]?.tiltY)||0)+'deg');
+    }
+  }
+  function changeCardFx(k,patch,announce=false){
+    ensureSceneExtras(state);
+    if(!state[k])return;
+    if(patch.cardScale!==undefined)state[k].cardScale=clamp(patch.cardScale,CARD_SCALE_MIN,CARD_SCALE_MAX,state[k].cardScale);
+    if(patch.tiltX!==undefined)state[k].tiltX=clamp(patch.tiltX,CARD_TILT_MIN,CARD_TILT_MAX,state[k].tiltX);
+    if(patch.tiltY!==undefined)state[k].tiltY=clamp(patch.tiltY,CARD_TILT_MIN,CARD_TILT_MAX,state[k].tiltY);
+    markDirty(); render();
+    if(announce)status(`Card ${k.toUpperCase()} · escala ${Math.round(state[k].cardScale)}% · inclinação Y ${Math.round(state[k].tiltY)}° · inclinação X ${Math.round(state[k].tiltX)}°.`);
+  }
+  document.querySelectorAll('[data-card-scale]').forEach(inp=>inp.addEventListener('input',e=>changeCardFx(e.target.dataset.cardScale,{cardScale:Number(e.target.value)})));
+  document.querySelectorAll('[data-card-tilt-x]').forEach(inp=>inp.addEventListener('input',e=>changeCardFx(e.target.dataset.cardTiltX,{tiltX:Number(e.target.value)})));
+  document.querySelectorAll('[data-card-tilt-y]').forEach(inp=>inp.addEventListener('input',e=>changeCardFx(e.target.dataset.cardTiltY,{tiltY:Number(e.target.value)})));
+  document.querySelectorAll('[data-card-action]').forEach(btn=>btn.addEventListener('click',()=>{
+    const [k,action]=String(btn.dataset.cardAction||'').split(':');
+    ensureSceneExtras(state);
+    const opt=state[k]; if(!opt)return;
+    if(action==='left')changeCardFx(k,{tiltY:(Number(opt.tiltY)||0)-CARD_TILT_STEP},true);
+    else if(action==='right')changeCardFx(k,{tiltY:(Number(opt.tiltY)||0)+CARD_TILT_STEP},true);
+    else if(action==='up')changeCardFx(k,{tiltX:(Number(opt.tiltX)||0)-CARD_TILT_STEP},true);
+    else if(action==='down')changeCardFx(k,{tiltX:(Number(opt.tiltX)||0)+CARD_TILT_STEP},true);
+    else if(action==='reset')changeCardFx(k,{cardScale:100,tiltX:0,tiltY:0},true);
+  }));
+
+  const previousRenderCardFx=render;
+  render=function(){
+    ensureSceneExtras(state); scenes.forEach(ensureSceneExtras);
+    previousRenderCardFx();
+    applyCardFxToDom(state);
+    syncCardFxControls(state);
+  };
+
+  const previousCompactSceneCardFx=compactScene;
+  compactScene=function(scene,idx){
+    ensureSceneExtras(scene);
+    const out=previousCompactSceneCardFx(scene,idx);
+    for(const k of OPTION_KEYS){
+      out.options[k].card_scale=scene[k].cardScale;
+      out.options[k].tilt_x=scene[k].tiltX;
+      out.options[k].tilt_y=scene[k].tiltY;
+      out[k].card_scale=scene[k].cardScale;
+      out[k].tilt_x=scene[k].tiltX;
+      out[k].tilt_y=scene[k].tiltY;
+    }
+    return out;
+  };
+
+  const previousSchemaDataCardFx=schemaData;
+  schemaData=function(){
+    const out=previousSchemaDataCardFx();
+    for(const k of OPTION_KEYS){
+      if(out.scene_patch?.[k]){
+        out.scene_patch[k].cardScale='60-150';
+        out.scene_patch[k].tiltX='-35 a 35';
+        out.scene_patch[k].tiltY='-35 a 35';
+      }
+    }
+    if(out.scene_patch?.placement){
+      out.scene_patch.placement.a.cardScale='% opcional';
+      out.scene_patch.placement.a.rotateX='graus opcional';
+      out.scene_patch.placement.a.rotateY='graus opcional';
+      out.scene_patch.placement.b.cardScale='% opcional';
+      out.scene_patch.placement.b.rotateX='graus opcional';
+      out.scene_patch.placement.b.rotateY='graus opcional';
+      out.scene_patch.placement.c.cardScale='% opcional';
+      out.scene_patch.placement.c.rotateX='graus opcional';
+      out.scene_patch.placement.c.rotateY='graus opcional';
+      out.scene_patch.placement.d.cardScale='% opcional';
+      out.scene_patch.placement.d.rotateX='graus opcional';
+      out.scene_patch.placement.d.rotateY='graus opcional';
+    }
+    return out;
+  };
+
+  const previousBuildPlacementFromSceneCardFx=buildPlacementFromScene;
+  buildPlacementFromScene=function(scene=state){
+    ensureSceneExtras(scene);
+    const out=previousBuildPlacementFromSceneCardFx(scene);
+    for(const k of OPTION_KEYS){
+      if(!out[k])continue;
+      out[k].cardScale=Math.round(Number(scene[k]?.cardScale)||100);
+      out[k].rotateX=Math.round(Number(scene[k]?.tiltX)||0);
+      out[k].rotateY=Math.round(Number(scene[k]?.tiltY)||0);
+    }
+    return out;
+  };
+
+  function cardFxExtrasFromAny(input){
+    const extras={};
+    const getNum=v=>{const n=Number(v);return Number.isFinite(n)?n:null};
+    const readFromObject=source=>{
+      if(!source||typeof source!=='object'||Array.isArray(source))return;
+      const src=source.placement&&typeof source.placement==='object'?source.placement:source;
+      for(const k of OPTION_KEYS){
+        const slot=src[k]||src[k.toUpperCase()];
+        if(!slot||typeof slot!=='object')continue;
+        const cardScale=getNum(slot.cardScale??slot.card_scale??slot.scaleCard??slot.frameScale??slot.frame_scale);
+        const rotateX=getNum(slot.rotateX??slot.rotate_x??slot.tiltX??slot.tilt_x);
+        const rotateY=getNum(slot.rotateY??slot.rotate_y??slot.tiltY??slot.tilt_y);
+        if(cardScale!==null||rotateX!==null||rotateY!==null)extras[k]={cardScale,rotateX,rotateY};
+      }
+    };
+    if(input&&typeof input==='object'&&!Array.isArray(input))readFromObject(input);
+    else if(typeof input==='string'){
+      const raw=String(input).trim();
+      if(!raw)return extras;
+      if(raw.startsWith('{')){try{readFromObject(JSON.parse(raw))}catch{}}
+      else{
+        const rows={};
+        raw.split(/\r?\n/).forEach(line=>{const m=line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.+?)\s*$/i);if(m)rows[m[1].toUpperCase()]=m[2].trim()});
+        const pick=(...keys)=>{for(const key of keys){if(rows[key]===undefined)continue;const n=Number(String(rows[key]).replace('%','').replace('px',''));if(Number.isFinite(n))return n}return null};
+        for(const k of OPTION_KEYS){
+          const u=k.toUpperCase();
+          const cardScale=pick(`${u}_CARD_SCALE`,`${u}_SCALE`),rotateX=pick(`${u}_ROTATE_X`,`${u}_TILT_X`),rotateY=pick(`${u}_ROTATE_Y`,`${u}_TILT_Y`);
+          if(cardScale!==null||rotateX!==null||rotateY!==null)extras[k]={cardScale,rotateX,rotateY};
+        }
+      }
+    }
+    return extras;
+  }
+
+  const previousNormalizePlacementCardFx=normalizeScenePlacement;
+  normalizeScenePlacement=function(input){
+    const out=previousNormalizePlacementCardFx(input);
+    const extras=cardFxExtrasFromAny(input);
+    for(const k of OPTION_KEYS){
+      if(!out[k]&&extras[k])out[k]={centerX:null,baseY:null};
+      if(!out[k])continue;
+      if(extras[k]?.cardScale!==undefined&&extras[k]?.cardScale!==null)out[k].cardScale=Number(extras[k].cardScale);
+      if(extras[k]?.rotateX!==undefined&&extras[k]?.rotateX!==null)out[k].rotateX=Number(extras[k].rotateX);
+      if(extras[k]?.rotateY!==undefined&&extras[k]?.rotateY!==null)out[k].rotateY=Number(extras[k].rotateY);
+    }
+    return out;
+  };
+
+  const previousApplyScenePlacementCardFx=applyScenePlacement;
+  applyScenePlacement=function(scene,input){
+    const placement=input&&input._normalizedPlacement===true?input:normalizeScenePlacement(input);
+    const out=previousApplyScenePlacementCardFx(scene,placement);
+    ensureSceneExtras(scene);
+    for(const k of OPTION_KEYS){
+      const slot=placement[k]; if(!slot)continue;
+      if(finiteValue(slot.cardScale))scene[k].cardScale=clamp(Number(slot.cardScale),CARD_SCALE_MIN,CARD_SCALE_MAX,scene[k].cardScale);
+      if(finiteValue(slot.rotateX))scene[k].tiltX=clamp(Number(slot.rotateX),CARD_TILT_MIN,CARD_TILT_MAX,scene[k].tiltX);
+      if(finiteValue(slot.rotateY))scene[k].tiltY=clamp(Number(slot.rotateY),CARD_TILT_MIN,CARD_TILT_MAX,scene[k].tiltY);
+    }
+    return out;
+  };
+
+  placementToText=function(placement){
+    const p=normalizeScenePlacement(placement),lines=['SET_SCENE_PLACEMENT'];
+    if(p.referenceWidth)lines.push(`REFERENCE_WIDTH=${Math.round(p.referenceWidth)}`);
+    if(p.referenceHeight)lines.push(`REFERENCE_HEIGHT=${Math.round(p.referenceHeight)}`);
+    for(const k of OPTION_KEYS){
+      const slot=p[k]; if(!slot)continue;
+      const u=k.toUpperCase();
+      if(finiteValue(slot.centerX))lines.push(`${u}_CENTER_X=${Number(slot.centerX)}`);
+      if(finiteValue(slot.baseY))lines.push(`${u}_BASE_Y=${Number(slot.baseY)}`);
+      if(finiteValue(slot.cardScale))lines.push(`${u}_CARD_SCALE=${Math.round(Number(slot.cardScale))}`);
+      if(finiteValue(slot.rotateY))lines.push(`${u}_ROTATE_Y=${Math.round(Number(slot.rotateY))}`);
+      if(finiteValue(slot.rotateX))lines.push(`${u}_ROTATE_X=${Math.round(Number(slot.rotateX))}`);
+    }
+    (p.overlays||[]).forEach((slot,i)=>{
+      if(!slot)return; const n=i+1;
+      if(finiteValue(slot.centerPct))lines.push(`PNG_${n}_CENTER_X=${Number(slot.centerPct)}%`); else if(finiteValue(slot.centerX))lines.push(`PNG_${n}_CENTER_X=${Number(slot.centerX)}px`);
+      if(finiteValue(slot.basePct))lines.push(`PNG_${n}_BASE_Y=${Number(slot.basePct)}%`); else if(finiteValue(slot.baseY))lines.push(`PNG_${n}_BASE_Y=${Number(slot.baseY)}px`);
+      if(finiteValue(slot.scale))lines.push(`PNG_${n}_SCALE=${Number(slot.scale)}`);
+      if(finiteValue(slot.width))lines.push(`PNG_${n}_WIDTH=${Number(slot.width)}`);
+      if(slot.depth)lines.push(`PNG_${n}_DEPTH=${slot.depth}`);
+      if(slot.name)lines.push(`PNG_${n}_NAME=${slot.name}`);
+    });
+    return lines.join('\n');
+  };
+
+  exportOverlayPlacement=function(index){
+    ensureSceneExtras(state);
+    const slot=state.overlays?.[index];
+    if(!slot||!(slot.image||slot.imageUrl||slot.assetId)){status('Carregue um PNG neste slot antes de exportar a configuração.');return}
+    const placement=buildPlacementFromScene(state);
+    placement.overlays=(placement.overlays||[]).map((item,i)=>i===index?item:null);
+    const block=placementToText(placement);
+    const n=index+1;
+    const safeName=(slot.name||('png-'+n)).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||('png-'+n);
+    const area=$('#placementInput'); if(area)area.value=block;
+    const blob=new Blob([block+'\n'],{type:'text/plain;charset=utf-8'});
+    const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`${safeName}-png${n}-config.txt`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1200);
+    if(navigator.clipboard?.writeText)navigator.clipboard.writeText(block).catch(()=>{});
+    status('TXT do PNG '+n+' exportado com o card e o PNG no mesmo bloco de coordenadas.');
+    return block;
+  };
+
+  const previousCoordinateReportCardFx=coordinateReport;
+  coordinateReport=function(){
+    ensureSceneExtras(state);
+    const base=previousCoordinateReportCardFx();
+    const keys=OPTION_KEYS.filter(k=>state[k]?.visible!==false);
+    const transformLines=['','==================================================','TRANSFORMAÇÕES DOS CARDS','==================================================',''];
+    for(const k of keys){
+      transformLines.push(`OPÇÃO ${k.toUpperCase()}`,`CARD_SCALE = ${Math.round(Number(state[k].cardScale)||100)}%`,`ROTATE_Y = ${Math.round(Number(state[k].tiltY)||0)}°`,`ROTATE_X = ${Math.round(Number(state[k].tiltX)||0)}°`,'');
+    }
+    transformLines.push('==================================================','BLOCO PRONTO PARA REAPLICAR NO CAMPO DE COORDENADAS','==================================================','',placementToText(buildPlacementFromScene(state)),'');
+    return base+'\n'+transformLines.join('\n');
+  };
+
+
   render();
 })();
 </script></body></html>
