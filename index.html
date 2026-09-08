@@ -550,6 +550,14 @@ linear-gradient(180deg,rgba(204,170,255,.10),transparent 42%)}
 .corvo-diagnostics summary{cursor:pointer;padding:8px 9px;font-size:11px;color:#b8c7d7}
 .corvo-diagnostics pre{white-space:pre-wrap;word-break:break-word;margin:0;padding:0 9px 10px;color:#91a7bc;font:10px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}
 .transition-field{border-top:1px solid #2d3948;padding-top:10px;margin-top:8px}
+
+/* V33 canvas controls for text scenes */
+.text-scene-block{pointer-events:auto;cursor:grab;user-select:none;-webkit-user-select:none}
+.text-scene-block.is-selected{outline:.22cqw dashed rgba(255,255,255,.88);outline-offset:.22cqw;border-radius:.6cqw}
+.text-scene-block.is-dragging,.text-scene-block.is-resizing{cursor:grabbing}
+.text-scene-handle{position:absolute;right:-.85cqw;bottom:-.85cqw;width:1.55cqw;height:1.55cqw;border-radius:999px;background:#baff6d;border:.16cqw solid #0e1722;box-shadow:0 .1cqw .45cqw rgba(0,0,0,.45);cursor:nwse-resize;pointer-events:auto}
+.text-scene-hint{display:block;margin-top:8px;color:#8ea2b6;font-size:12px;line-height:1.35}
+
 </style>
 <style id="corvoSidebarCleanupStyle">
 /* CORVO SIDEBAR CLEANUP V30 */
@@ -1203,8 +1211,8 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
     scene.background=scene.background||null;
     scene.backgroundVideo=scene.backgroundVideo||null;
     scene.backgroundVideoUrl=String(scene.backgroundVideoUrl||'');
-    scene.transition=['cut','crossfade','slide-left','flash','zoom-fade'].includes(scene.transition)?scene.transition:'cut';scene.transitionType=['cut','crossfade','slide-left','flash','zoom-fade'].includes(scene.transitionType)?scene.transitionType:scene.transition;scene.transition=scene.transitionType;
-    scene.transitionDuration=clamp(scene.transitionDuration,.15,2,.55);
+    scene.transition=['cut','crossfade','slide-left','flash','zoom-fade'].includes(scene.transition)?scene.transition:'crossfade';scene.transitionType=['cut','crossfade','slide-left','flash','zoom-fade'].includes(scene.transitionType)?scene.transitionType:scene.transition;scene.transition=scene.transitionType;
+    scene.transitionDuration=clamp(scene.transitionDuration,.2,5,2);
     scene.backgroundMotion=['none','zoom-in','zoom-out'].includes(scene.backgroundMotion)?scene.backgroundMotion:'none';
     scene.backgroundZoom=clamp(scene.backgroundZoom,0,30,8);
     scene.backgroundBlur=clamp(scene.backgroundBlur,0,30,0);
@@ -3387,10 +3395,10 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
 
   const exportPanel=document.createElement('section');
   exportPanel.className='corvo-export-panel';
-  exportPanel.innerHTML=`<h3>Exportar</h3><p class="export-note">Render determinístico em Canvas. MP4 usa H.264 / 30 FPS / 8 Mbps e áudio AAC quando carregado.</p><div class="corvo-export-options"><label class="field"><span>Áudio do projeto</span><div class="corvo-export-row"><button type="button" id="corvoAudioLoad">＋ Carregar áudio</button><button type="button" id="corvoAudioClear">Remover</button></div></label><input type="file" id="corvoAudioFile" accept="audio/*" hidden><audio id="corvoAudioPreview" controls preload="metadata"></audio><div class="corvo-audio-status" id="corvoAudioStatus">Sem áudio · MP4 será silencioso.</div><label class="field"><span>Volume do áudio</span><input id="corvoAudioVolume" type="range" min="0" max="100" value="100"></label><label class="option-visible"><input type="checkbox" id="corvoAudioLoop" checked> Repetir áudio até o fim do vídeo</label><label class="field"><span>Projeto com formatos misturados</span><select id="corvoProjectFormat"><option value="auto">Projeto completo · mesmo formato</option><option value="16:9">Exportar somente 16:9</option><option value="9:16">Exportar somente 9:16</option></select></label><div class="corvo-storage-status" id="corvoStorageStatus">Vídeos longos usam armazenamento temporário quando disponível.</div></div><div class="corvo-export-grid"><button id="corvoExportPng"><strong>PNG · cena atual</strong><span id="corvoPngInfo">1920 × 1080</span></button><button id="corvoExportSceneMp4"><strong>Cena atual · MP4 1080p · 30 FPS</strong><span id="corvoSceneMp4Info">8 s · H.264</span></button><button id="corvoExportProjectMp4"><strong>Projeto inteiro · MP4 1080p · 30 FPS</strong><span id="corvoProjectMp4Info">1 cena · 8 s</span></button><button id="corvoCancelExport" type="button"><strong>Cancelar exportação</strong><span>Interromper com segurança</span></button></div><div class="corvo-export-progress"><i id="corvoExportBar"></i></div><small id="corvoExportMessage">Pronto para exportar.</small><details class="corvo-diagnostics" id="corvoDiagnostics"><summary>Diagnóstico da última exportação</summary><pre id="corvoDiagnosticsText">Ainda não há diagnóstico.</pre></details>`;
+  exportPanel.innerHTML=`<h3>Exportar</h3><p class="export-note">Render determinístico em Canvas. MP4 usa H.264 / 30 FPS / 8 Mbps e a faixa principal adaptativa em AAC.</p><div class="corvo-export-options"><label class="field"><span>Áudio principal</span><div class="corvo-export-row"><button type="button" id="corvoAudioDefault">♫ Usar faixa principal</button><button type="button" id="corvoAudioLoad">Trocar áudio</button><button type="button" id="corvoAudioClear">Remover</button></div></label><input type="file" id="corvoAudioFile" accept="audio/*" hidden><audio id="corvoAudioPreview" controls preload="metadata"></audio><div class="corvo-audio-status" id="corvoAudioStatus">Faixa principal · ajustada automaticamente à duração do projeto.</div><label class="field"><span>Volume do áudio</span><input id="corvoAudioVolume" type="range" min="0" max="100" value="100"></label><label class="option-visible"><input type="checkbox" id="corvoAudioLoop"> Repetir manualmente se o vídeo ultrapassar a música</label><div class="small">Padrão Forma: fade-in 1,25 s · fade-out 2 s · sem alterar velocidade. Se o projeto encurtar ou aumentar, o corte virtual e o fade final são recalculados.</div><label class="field"><span>Projeto com formatos misturados</span><select id="corvoProjectFormat"><option value="auto">Projeto completo · mesmo formato</option><option value="16:9">Exportar somente 16:9</option><option value="9:16">Exportar somente 9:16</option></select></label><div class="corvo-storage-status" id="corvoStorageStatus">Vídeos longos usam armazenamento temporário quando disponível.</div></div><div class="corvo-export-grid"><button id="corvoExportPng"><strong>PNG · cena atual</strong><span id="corvoPngInfo">1920 × 1080</span></button><button id="corvoExportSceneMp4"><strong>Cena atual · MP4 1080p · 30 FPS</strong><span id="corvoSceneMp4Info">8 s · H.264</span></button><button id="corvoExportProjectMp4"><strong>Projeto inteiro · MP4 1080p · 30 FPS</strong><span id="corvoProjectMp4Info">1 cena · 8 s</span></button><button id="corvoCancelExport" type="button"><strong>Cancelar exportação</strong><span>Interromper com segurança</span></button></div><div class="corvo-export-progress"><i id="corvoExportBar"></i></div><small id="corvoExportMessage">Pronto para exportar.</small><details class="corvo-diagnostics" id="corvoDiagnostics"><summary>Diagnóstico da última exportação</summary><pre id="corvoDiagnosticsText">Ainda não há diagnóstico.</pre></details>`;
   const exporterHost=document.querySelector('.panel');
   if(exporterHost)exporterHost.appendChild(exportPanel);
-  const transitionControls=document.createElement('div');transitionControls.className='transition-field';transitionControls.innerHTML=`<label class="field"><span>Transição ao entrar nesta cena</span><select id="sceneTransition"><option value="cut">Corte direto</option><option value="crossfade">Dissolver</option><option value="slide-left">Deslizar</option><option value="flash">Flash</option><option value="zoom-fade">Zoom + fade</option></select></label><label class="field"><span>Duração da transição</span><input id="transitionDuration" type="range" min="0.15" max="2" step="0.05" value="0.55"></label><div class="small" id="transitionDurationValue">0,55 s</div>`;if(exporterHost)exporterHost.appendChild(transitionControls);
+  const transitionControls=document.createElement('div');transitionControls.className='transition-field';transitionControls.innerHTML=`<label class="field"><span>Transição ao entrar nesta cena</span><select id="sceneTransition"><option value="cut">Corte direto</option><option value="crossfade">Dissolver</option><option value="slide-left">Deslizar</option><option value="flash">Flash</option><option value="zoom-fade">Zoom + fade</option></select></label><label class="field"><span>Duração da transição · bloco independente</span><input id="transitionDuration" type="range" min="0.2" max="5" step="0.05" value="2"></label><div class="small" id="transitionDurationValue">2,00 s · 1,00 s final anterior + 1,00 s início próximo</div><div class="small">Sistema Forma: a transição não consome o tempo da cena. O frame final anterior e o primeiro frame seguinte ficam congelados; o efeito é recalculado proporcionalmente para qualquer duração.</div>`;if(exporterHost)exporterHost.appendChild(transitionControls);
 
   function exportDimensions(format){return format==='9:16'?{w:1080,h:1920}:{w:1920,h:1080}}
   function exportSetProgress(progress,message){
@@ -3400,7 +3408,7 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
   }
   function exportSetBusy(busy){
     exportBusy=busy;
-    ['corvoExportPng','corvoExportSceneMp4','corvoExportProjectMp4','corvoAudioLoad','corvoAudioClear','corvoProjectFormat'].forEach(id=>{const el=$('#'+id);if(el)el.disabled=busy});const cancel=$('#corvoCancelExport');if(cancel){cancel.classList.toggle('active',busy);cancel.disabled=!busy}
+    ['corvoExportPng','corvoExportSceneMp4','corvoExportProjectMp4','corvoAudioDefault','corvoAudioLoad','corvoAudioClear','corvoProjectFormat'].forEach(id=>{const el=$('#'+id);if(el)el.disabled=busy});const cancel=$('#corvoCancelExport');if(cancel){cancel.classList.toggle('active',busy);cancel.disabled=!busy}
   }
   function updateExporterUi(){
     ensureSceneExtras(state);
@@ -3409,7 +3417,7 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
     if($('#corvoSceneMp4Info'))$('#corvoSceneMp4Info').textContent=`${Number(state.duration)||8} s · H.264${exportAudioFile?' + AAC':''}`;
     if($('#corvoProjectMp4Info'))$('#corvoProjectMp4Info').textContent=`${filtered.length} cena${filtered.length===1?'':'s'} · ${Number(filtered.reduce((s,c)=>s+(Number(c.duration)||8),0).toFixed(1))} s${exportAudioFile?' · AAC':''}`;
     const storage=$('#corvoStorageStatus');if(storage)storage.textContent=total>=LONG_PROJECT_SECONDS?(total>=LONG_RAM_UNSAFE_SECONDS?'Projeto longo · OPFS obrigatório para evitar falta de memória.':'Projeto longo · o editor tentará gravar o MP4 em armazenamento temporário (OPFS).'):'Projeto curto · saída final em memória.';
-    const tr=$('#sceneTransition'),td=$('#transitionDuration'),tdv=$('#transitionDurationValue');if(tr)tr.value=state.transitionType||state.transition||'cut';if(td)td.value=String(state.transitionDuration??.55);if(tdv)tdv.textContent=(Number(state.transitionDuration||.55)).toFixed(2).replace('.',',')+' s';
+    const tr=$('#sceneTransition'),td=$('#transitionDuration'),tdv=$('#transitionDurationValue');if(tr)tr.value=state.transitionType||state.transition||'cut';if(td)td.value=String(state.transitionDuration??2);if(tdv)tdv.textContent=(Number(state.transitionDuration||2)).toFixed(2).replace('.',',')+' s';
   }
   function updateExporterCompatibility(){
     const mp4Ok=typeof VideoEncoder==='function'&&typeof VideoFrame==='function';
@@ -3851,12 +3859,11 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
   async function exportProjectMp4(){if(exportBusy)return;exportSetBusy(true);try{const list=selectedProjectScenes(),r=await renderCorvoMp4(list,{project:true});downloadExportBlob(r.blob,`corvo-projeto-${list.length}-cenas-${r.width}x${r.height}-30fps${exportAudioFile?'-aac':''}.mp4`);status('MP4 do projeto exportado · '+list.length+' cenas · 30 FPS'+(r.diskBacked?' · OPFS temporário':'')+(exportAudioFile?' · AAC.':'.'))}catch(err){console.error('CORVO_PROJECT_MP4',err);const msg=exportErrorMessage(err);exportSetProgress(0,msg);status(msg)}finally{exportSetBusy(false)}}
 
   const audioFileInput=$('#corvoAudioFile'),audioPreview=$('#corvoAudioPreview');
-  $('#corvoAudioLoad').onclick=()=>{if(exportBusy)return;audioFileInput.value='';audioFileInput.click()};
-  audioFileInput.onchange=e=>{const file=e.target.files?.[0];if(!file)return;if(!String(file.type||'').startsWith('audio/')){status('Escolha um arquivo de áudio.');return}if(exportAudioUrl)URL.revokeObjectURL(exportAudioUrl);exportAudioFile=file;exportAudioUrl=URL.createObjectURL(file);if(audioPreview){audioPreview.src=exportAudioUrl;audioPreview.style.display='block'}const st=$('#corvoAudioStatus');if(st)st.textContent=`${file.name} · ${(file.size/1_000_000).toFixed(1)} MB · será codificado em AAC`;updateExporterUi();status('Áudio carregado para o MP4.')};
-  $('#corvoAudioClear').onclick=()=>{if(exportAudioUrl)URL.revokeObjectURL(exportAudioUrl);exportAudioUrl='';exportAudioFile=null;if(audioPreview){audioPreview.pause();audioPreview.removeAttribute('src');audioPreview.load();audioPreview.style.display='none'}const st=$('#corvoAudioStatus');if(st)st.textContent='Sem áudio · MP4 será silencioso.';updateExporterUi()};
+  // V2.2 controla o áudio principal adaptativo; os handlers legados ficam inativos.
+  $('#corvoAudioLoad').onclick=()=>{};audioFileInput.onchange=null;$('#corvoAudioClear').onclick=()=>{};
   $('#corvoProjectFormat').onchange=updateExporterUi;
   $('#sceneTransition').onchange=e=>{ensureSceneExtras(state);state.transitionType=e.target.value;state.transition=state.transitionType;markDirty();render();status('Transição da cena atualizada.')};
-  $('#transitionDuration').oninput=e=>{ensureSceneExtras(state);state.transitionDuration=Math.max(.15,Math.min(2,Number(e.target.value)||.55));markDirty();const out=$('#transitionDurationValue');if(out)out.textContent=state.transitionDuration.toFixed(2).replace('.',',')+' s'};
+  $('#transitionDuration').oninput=e=>{ensureSceneExtras(state);state.transitionDuration=Math.max(.2,Math.min(5,Number(e.target.value)||2));markDirty();const out=$('#transitionDurationValue');if(out)out.textContent=state.transitionDuration.toFixed(2).replace('.',',')+' s'};
   $('#corvoCancelExport').onclick=()=>{if(!exportBusy)return;exportCancelRequested=true;exportSetProgress(Number.parseFloat($('#corvoExportBar')?.style.width)||0,'Cancelando exportação…');status('Cancelamento solicitado. O encoder será interrompido no próximo ponto seguro.')};
 
   $('#corvoExportPng').onclick=exportCurrentScenePng;
@@ -3864,7 +3871,7 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
   $('#corvoExportProjectMp4').onclick=()=>{if(!updateExporterCompatibility()){status('MP4 requer WebCodecs. Use Chrome ou Edge atualizado.');return}return exportProjectMp4()};
   const renderBeforeExporterV1=render;
   render=function(){renderBeforeExporterV1();updateExporterUi();updateExporterCompatibility()};
-  window.CorvoExporter={version:'2.1.0',paintFrame:paintCorvoExportFrame,exportPng:exportCurrentScenePng,exportSceneMp4,exportProjectMp4,renderMp4:renderCorvoMp4,compatibility:updateExporterCompatibility};
+  window.CorvoExporter={version:'2.2.0',paintFrame:paintCorvoExportFrame,exportPng:exportCurrentScenePng,exportSceneMp4,exportProjectMp4,renderMp4:renderCorvoMp4,compatibility:updateExporterCompatibility};
   updateExporterUi();updateExporterCompatibility();
 
 
@@ -4110,7 +4117,7 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
 
   scenes=scenes.map(s=>ensureSceneExtras(s));
   state=ensureSceneExtras(scenes[activeScene]||state);
-  if(window.CorvoExporter){window.CorvoExporter.paintFrame=paintCorvoExportFrame;window.CorvoExporter.version='2.1.0';}
+  if(window.CorvoExporter){window.CorvoExporter.paintFrame=paintCorvoExportFrame;window.CorvoExporter.version='2.2.0';}
   if(window.CorvoQuizMCP){window.CorvoQuizMCP.getSchema=schemaData;}
   render();
   drawStrip();
@@ -4120,17 +4127,23 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
 {
   const AUDIO_SAMPLE_RATE=48000, AUDIO_CHANNELS=2, AUDIO_BITRATE=192000, AUDIO_QUEUE_LIMIT=16, AUDIO_CHUNK_FRAMES=4096;
   const LONG_PROJECT_SECONDS=300, RAM_UNSAFE_SECONDS=600, OPFS_CHUNK_SIZE=8*1024*1024;
-  let projectAudioTrack={data:null,name:'',volume:1,loop:true};
+  const BUNDLED_AUDIO_SRC='audio/faixa-principal.mp3', BUNDLED_AUDIO_NAME='Faixa principal', BUNDLED_AUDIO_DURATION=2441.639167, PROJECT_AUDIO_FADE_IN=1.25, PROJECT_AUDIO_FADE_OUT=2;
+  function bundledProjectAudio(){return {data:null,src:BUNDLED_AUDIO_SRC,builtin:true,name:BUNDLED_AUDIO_NAME,volume:1,loop:false,fadeIn:PROJECT_AUDIO_FADE_IN,fadeOut:PROJECT_AUDIO_FADE_OUT,sourceDuration:BUNDLED_AUDIO_DURATION};}
+  let projectAudioTrack=bundledProjectAudio();
   let exportAbortController=null;
 
   function normalizeProjectAudio(raw){
-    const v=Number(raw?.volume);
-    return {data:typeof raw?.data==='string'&&raw.data.startsWith('data:audio/')?raw.data:null,name:typeof raw?.name==='string'?raw.name.slice(0,120):'',volume:Number.isFinite(v)?Math.max(0,Math.min(1,v)):1,loop:raw?.loop!==false};
+    if(!raw||typeof raw!=='object')return {data:null,src:'',builtin:false,name:'',volume:1,loop:false,fadeIn:PROJECT_AUDIO_FADE_IN,fadeOut:PROJECT_AUDIO_FADE_OUT,sourceDuration:0};
+    const v=Number(raw.volume),sd=Number(raw.sourceDuration),fi=Number(raw.fadeIn),fo=Number(raw.fadeOut),data=typeof raw.data==='string'&&raw.data.startsWith('data:audio/')?raw.data:null,src=typeof raw.src==='string'?raw.src:'';
+    return {data,src,builtin:raw.builtin===true||(!data&&src===BUNDLED_AUDIO_SRC),name:typeof raw.name==='string'?raw.name.slice(0,120):(src===BUNDLED_AUDIO_SRC?BUNDLED_AUDIO_NAME:''),volume:Number.isFinite(v)?Math.max(0,Math.min(1,v)):1,loop:raw.loop===true,fadeIn:Number.isFinite(fi)?Math.max(0,fi):PROJECT_AUDIO_FADE_IN,fadeOut:Number.isFinite(fo)?Math.max(0,fo):PROJECT_AUDIO_FADE_OUT,sourceDuration:Number.isFinite(sd)&&sd>0?sd:(src===BUNDLED_AUDIO_SRC?BUNDLED_AUDIO_DURATION:0)};
   }
+  function projectAudioSource(track=projectAudioTrack){return track?.data||track?.src||''}
+  function incomingTransitionDuration(scene,index){if(index<=0||!scene||(scene.transitionType||scene.transition||'cut')==='cut')return 0;return clamp(scene.transitionDuration,.2,5,2)}
+  function projectDurationWithTransitions(list){return list.reduce((total,scene,index)=>total+(Number(scene.duration)||8)+incomingTransitionDuration(scene,index),0)}
   function sceneExportDefaults(scene){
     if(!scene||typeof scene!=='object')return scene;
-    scene.transitionType=['cut','crossfade','slide-left','flash','zoom-fade'].includes(scene.transitionType)?scene.transitionType:(['cut','crossfade','slide-left','flash','zoom-fade'].includes(scene.transition)?scene.transition:'cut');scene.transition=scene.transitionType;
-    scene.transitionDuration=clamp(scene.transitionDuration,.15,2,.55);
+    scene.transitionType=['cut','crossfade','slide-left','flash','zoom-fade'].includes(scene.transitionType)?scene.transitionType:(['cut','crossfade','slide-left','flash','zoom-fade'].includes(scene.transition)?scene.transition:'crossfade');scene.transition=scene.transitionType;
+    scene.transitionDuration=clamp(scene.transitionDuration,.2,5,2);
     scene.backgroundVideo=typeof scene.backgroundVideo==='string'?scene.backgroundVideo:null;
     scene.backgroundVideoUrl=typeof scene.backgroundVideoUrl==='string'?scene.backgroundVideoUrl:'';
     scene.backgroundVideoName=typeof scene.backgroundVideoName==='string'?scene.backgroundVideoName.slice(0,120):'';
@@ -4143,16 +4156,17 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
   function syncV2Ui(){
     ensureSceneExtras(state);
     const trans=$('#sceneTransition'),td=$('#transitionDuration'),tv=$('#transitionDurationValue');
-    if(trans)trans.value=state.transitionType||'cut';
-    if(td)td.value=String(state.transitionDuration??.55);
-    if(tv)tv.textContent=(Number(state.transitionDuration)||.55).toFixed(2).replace('.',',')+' s';
-    const volume=$('#corvoAudioVolume'),loop=$('#corvoAudioLoop'),audio=$('#corvoAudioPreview'),audioStatus=$('#corvoAudioStatus');
+    if(trans){trans.value=state.transitionType||'crossfade';trans.disabled=activeScene===0;}
+    if(td){td.value=String(state.transitionDuration??2);td.disabled=activeScene===0||(state.transitionType||'crossfade')==='cut';}
+    if(tv){const dur=Number(state.transitionDuration)||2,half=dur/2;tv.textContent=dur.toFixed(2).replace('.',',')+` s · ${half.toFixed(2).replace('.',',')} s final anterior + ${half.toFixed(2).replace('.',',')} s primeiro frame próximo`;if(activeScene===0)tv.textContent='Primeira cena · não possui transição de entrada';else if((state.transitionType||'crossfade')==='cut')tv.textContent='Corte direto · sem bloco de transição';}
+    const volume=$('#corvoAudioVolume'),loop=$('#corvoAudioLoop'),audio=$('#corvoAudioPreview'),audioStatus=$('#corvoAudioStatus'),source=projectAudioSource();
     if(volume)volume.value=String(Math.round(projectAudioTrack.volume*100));
-    if(loop)loop.checked=projectAudioTrack.loop!==false;
-    if(audio){if(projectAudioTrack.data&&audio.src!==projectAudioTrack.data)audio.src=projectAudioTrack.data;if(!projectAudioTrack.data&&audio.getAttribute('src')){audio.removeAttribute('src');audio.load()}}
-    if(audioStatus)audioStatus.textContent=projectAudioTrack.data?`${projectAudioTrack.name||'Áudio carregado'} · AAC 192 kbps no MP4`:'Sem áudio · MP4 será silencioso.';
+    if(loop)loop.checked=projectAudioTrack.loop===true;
+    if(audio){if(source&&audio.getAttribute('src')!==source){audio.src=source;audio.style.display='block'}if(!source&&audio.getAttribute('src')){audio.removeAttribute('src');audio.load();audio.style.display='none'}}
     const sel=$('#corvoProjectFormat'),fmt=sel?.value||'auto';
-    const selected=fmt==='auto'?scenes:scenes.filter(s=>(s.format||'16:9')===fmt),total=selected.reduce((n,s)=>n+(Number(s.duration)||8),0);
+    const selected=fmt==='auto'?scenes:scenes.filter(s=>(s.format||'16:9')===fmt),total=projectDurationWithTransitions(selected);
+    if(audioStatus){if(source){const playable=projectAudioTrack.loop?total:Math.min(total,projectAudioTrack.sourceDuration||BUNDLED_AUDIO_DURATION);audioStatus.textContent=`${projectAudioTrack.name||BUNDLED_AUDIO_NAME}${projectAudioTrack.builtin?' · mesma faixa do Forma':''} · vídeo ${Number(total.toFixed(1))} s · áudio ${Number(playable.toFixed(1))} s · fade ${projectAudioTrack.fadeIn.toFixed(2).replace('.',',')}s / ${projectAudioTrack.fadeOut.toFixed(2).replace('.',',')}s${projectAudioTrack.loop?' · loop manual':''}`;}else audioStatus.textContent='Sem áudio · MP4 será silencioso.';}
+    const projectInfo=$('#projectInfo');if(projectInfo)projectInfo.textContent=`${selected.length} cena${selected.length===1?'':'s'} · ${Number(total.toFixed(1))} s incluindo transições`; 
     const info=$('#corvoProjectMp4Info');if(info)info.textContent=`${selected.length} cena${selected.length===1?'':'s'} · ${Number(total.toFixed(1))} s${fmt==='auto'?'':` · ${fmt}`}`;
     const storage=$('#corvoStorageStatus');if(storage){storage.textContent=total>=RAM_UNSAFE_SECONDS?'Projeto longo: OPFS/disco temporário obrigatório para proteger a RAM.':total>=LONG_PROJECT_SECONDS?'Projeto longo: OPFS/disco temporário será priorizado.':'Projeto curto: memória local; OPFS será usado automaticamente quando necessário.';}
   }
@@ -4160,13 +4174,14 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
   render=function(){renderBeforeV2();syncV2Ui();};
 
   $('#sceneTransition')?.addEventListener('change',e=>{ensureSceneExtras(state);state.transitionType=e.target.value;state.transition=state.transitionType;markDirty();render();status('Transição da cena: '+e.target.options[e.target.selectedIndex].text+'.')});
-  $('#transitionDuration')?.addEventListener('input',e=>{ensureSceneExtras(state);state.transitionDuration=clamp(e.target.value,.15,2,.55);markDirty();const out=$('#transitionDurationValue');if(out)out.textContent=state.transitionDuration.toFixed(2).replace('.',',')+' s';});
+  $('#transitionDuration')?.addEventListener('input',e=>{ensureSceneExtras(state);state.transitionDuration=clamp(e.target.value,.2,5,2);markDirty();const out=$('#transitionDurationValue');if(out){const half=state.transitionDuration/2;out.textContent=state.transitionDuration.toFixed(2).replace('.',',')+` s · ${half.toFixed(2).replace('.',',')} s final anterior + ${half.toFixed(2).replace('.',',')} s início próximo`;}syncV2Ui();});
   $('#corvoProjectFormat')?.addEventListener('change',syncV2Ui);
   $('#corvoAudioVolume')?.addEventListener('input',e=>{projectAudioTrack.volume=Math.max(0,Math.min(1,(Number(e.target.value)||0)/100));syncV2Ui()});
   $('#corvoAudioLoop')?.addEventListener('change',e=>{projectAudioTrack.loop=!!e.target.checked;syncV2Ui()});
   $('#corvoAudioLoad')?.addEventListener('click',()=>{const input=$('#corvoAudioFile');if(input){input.value='';input.click()}});
+  $('#corvoAudioDefault')?.addEventListener('click',()=>{projectAudioTrack=bundledProjectAudio();markDirty();syncV2Ui();status('Faixa principal do Forma restaurada. Ela se ajustará automaticamente à duração do projeto.');});
   $('#corvoAudioClear')?.addEventListener('click',()=>{projectAudioTrack=normalizeProjectAudio(null);syncV2Ui();markDirty();status('Áudio do projeto removido.')});
-  $('#corvoAudioFile')?.addEventListener('change',e=>{const file=e.target.files?.[0];if(!file)return;if(!file.type.startsWith('audio/')||file.size>120*1024*1024){status('Use um arquivo de áudio de até 120 MB.');return}const reader=new FileReader();reader.onerror=()=>status('Não foi possível ler o áudio.');reader.onload=()=>{projectAudioTrack={data:String(reader.result),name:file.name.slice(0,120),volume:1,loop:true};markDirty();syncV2Ui();status('Áudio carregado. O MP4 será exportado com AAC.');};reader.readAsDataURL(file)});
+  $('#corvoAudioFile')?.addEventListener('change',e=>{const file=e.target.files?.[0];if(!file)return;if(!file.type.startsWith('audio/')||file.size>120*1024*1024){status('Use um arquivo de áudio de até 120 MB.');return}const reader=new FileReader();reader.onerror=()=>status('Não foi possível ler o áudio.');reader.onload=()=>{projectAudioTrack={data:String(reader.result),src:'',builtin:false,name:file.name.slice(0,120),volume:1,loop:false,fadeIn:PROJECT_AUDIO_FADE_IN,fadeOut:PROJECT_AUDIO_FADE_OUT,sourceDuration:0};markDirty();syncV2Ui();status('Áudio carregado. O corte virtual e o fade final serão ajustados à duração do projeto.');};reader.readAsDataURL(file)});
 
   // Cenário animado: vídeo MP4/WebM, mantendo a mesma interface do botão de cenário.
   const bgInput=$('#bgFile');
@@ -4218,14 +4233,30 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
     const lines=[`Vídeo: ${diag.duration.toFixed(2)} s · ${diag.frameCount} frames · ${diag.format}`,`Tempo total: ${wall.toFixed(2)} s · FPS efetivo: ${fps.toFixed(1)}`,`Pintura/frame: média ${avg.toFixed(1)} ms · p95 ${p95.toFixed(1)} ms · pior ${worst.toFixed(1)} ms`,`Encoder: ${diag.encoderWaits} esperas · ${(diag.encoderWaitMs/1000).toFixed(2)} s · fila máx ${diag.maxQueue}`,`AAC: ${diag.audioChunks} chunks`,`Transições: ${diag.transitionFrames} frames`, `Recuperação cenário: ${diag.backgroundRecoveries} · falhas de seek ${diag.backgroundSeekFailures} · falhas duras ${diag.backgroundHardFailures}`,`Frames recuperados: ${diag.frameRecoveries} · falhas: ${diag.frameFailures}`,`Saída: ${(diag.outputBytes/1024/1024).toFixed(1)} MB · ${diag.storage}${diag.cancelled?' · CANCELADA':''}`];
     const pre=$('#corvoDiagnosticsText');if(pre)pre.textContent=lines.join('\n');const details=$('#corvoDiagnostics');if(details)details.open=true;
   }
-  function projectSceneAtTimeV2(list,time){let cursor=0;for(let i=0;i<list.length;i++){const dur=Number(list[i].duration)||8;if(time<cursor+dur||i===list.length-1)return {scene:list[i],index:i,localTime:Math.max(0,Math.min(dur,time-cursor)),sceneStart:cursor,duration:dur};cursor+=dur}return {scene:list[0],index:0,localTime:0,sceneStart:0,duration:Number(list[0]?.duration)||8}}
+  function projectSceneAtTimeV2(list,time){
+    let cursor=0;
+    for(let i=0;i<list.length;i++){
+      const scene=list[i],td=incomingTransitionDuration(scene,i);
+      if(td>0){
+        if(time<cursor+td)return {kind:'transition',scene,index:i,previous:list[i-1],localTime:Math.max(0,Math.min(td,time-cursor)),sceneStart:cursor+td,duration:td,transitionDuration:td};
+        cursor+=td;
+      }
+      const dur=Number(scene.duration)||8;
+      if(time<cursor+dur||i===list.length-1)return {kind:'scene',scene,index:i,localTime:Math.max(0,Math.min(dur,time-cursor)),sceneStart:cursor,duration:dur};
+      cursor+=dur;
+    }
+    return {kind:'scene',scene:list[0],index:0,localTime:0,sceneStart:0,duration:Number(list[0]?.duration)||8};
+  }
   async function paintProjectFrameV2(canvas,list,time,diag){
-    const info=projectSceneAtTimeV2(list,time),scene=info.scene,type=scene.transitionType||'cut',td=Math.min(Number(scene.transitionDuration)||.55,info.duration*.45);
-    if(info.index===0||type==='cut'||info.localTime>=td){await paintCorvoExportFrame(canvas,scene,info.localTime,info.index);return info}
+    const info=projectSceneAtTimeV2(list,time),scene=info.scene;
+    if(info.kind!=='transition'){await paintCorvoExportFrame(canvas,scene,info.localTime,info.index);return info}
+    const type=scene.transitionType||'cut',td=Math.max(.001,info.transitionDuration||2),prev=info.previous||list[Math.max(0,info.index-1)],prevDur=Number(prev?.duration)||8,p=Math.max(0,Math.min(1,info.localTime/td)),{w:W,h:H}=exportDimensions(scene.format);
+    if(!prev||type==='cut'){await paintCorvoExportFrame(canvas,scene,0,info.index);return info}
     diag.transitionFrames++;
-    const prev=list[info.index-1],prevDur=Number(prev.duration)||8,p=Math.max(0,Math.min(1,info.localTime/Math.max(.001,td))),{w:W,h:H}=exportDimensions(scene.format);
     const a=document.createElement('canvas'),b=document.createElement('canvas');a.width=b.width=W;a.height=b.height=H;
-    await paintCorvoExportFrame(a,prev,Math.max(0,prevDur-td+info.localTime),info.index-1);await paintCorvoExportFrame(b,scene,info.localTime,info.index);
+    // Sistema Forma: a transição é um bloco próprio. A cena anterior fica no último frame
+    // e a próxima fica no primeiro frame durante todo o efeito; nenhum relógio de cena é consumido.
+    await paintCorvoExportFrame(a,prev,prevDur,info.index-1);await paintCorvoExportFrame(b,scene,0,info.index);
     canvas.width=W;canvas.height=H;const ctx=canvas.getContext('2d',{alpha:false});ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
     if(type==='crossfade'){ctx.globalAlpha=1;ctx.drawImage(a,0,0);ctx.globalAlpha=p;ctx.drawImage(b,0,0)}
     else if(type==='slide-left'){ctx.globalAlpha=1;ctx.drawImage(a,-p*W,0);ctx.drawImage(b,(1-p)*W,0)}
@@ -4236,13 +4267,23 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
   }
 
   async function decodeProjectAudio(track){
-    if(!track?.data)return null;const response=await fetch(track.data);const bytes=await response.arrayBuffer();const Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx)throw Error('O navegador não possui AudioContext para decodificar o áudio.');const ac=new Ctx({sampleRate:AUDIO_SAMPLE_RATE});try{return await ac.decodeAudioData(bytes.slice(0))}finally{await ac.close().catch(()=>{})}
+    const source=projectAudioSource(track);if(!source)return null;let bytes;try{const response=await fetch(source);if(!response.ok&&response.status)throw Error('HTTP '+response.status);bytes=await response.arrayBuffer()}catch(err){throw Error('Não foi possível abrir o áudio principal. Mantenha a pasta audio ao lado do index.html. '+(err?.message||''))}const Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx)throw Error('O navegador não possui AudioContext para decodificar o áudio.');const ac=new Ctx({sampleRate:AUDIO_SAMPLE_RATE});try{const buffer=await ac.decodeAudioData(bytes.slice(0));track.sourceDuration=buffer.duration;return buffer}finally{await ac.close().catch(()=>{})}
   }
   function sampleAudio(buffer,channel,pos){const data=buffer.getChannelData(Math.min(channel,buffer.numberOfChannels-1)),i=Math.floor(pos),f=pos-i,a=data[Math.min(data.length-1,Math.max(0,i))]||0,b=data[Math.min(data.length-1,Math.max(0,i+1))]||a;return a+(b-a)*f}
   async function encodeProjectAudio(buffer,duration,track,encoder,muxer,signal,diag){
-    const totalFrames=Math.ceil(duration*AUDIO_SAMPLE_RATE),volume=Math.max(0,Math.min(1,Number(track.volume)||0)),srcFrames=buffer.length,srcRate=buffer.sampleRate,srcDuration=buffer.duration;
-    for(let start=0;start<totalFrames;start+=AUDIO_CHUNK_FRAMES){checkExportAbort(signal);const frames=Math.min(AUDIO_CHUNK_FRAMES,totalFrames-start),pcm=new Int16Array(frames*AUDIO_CHANNELS);for(let i=0;i<frames;i++){const global=(start+i)/AUDIO_SAMPLE_RATE;let srcTime=global;if(track.loop&&srcDuration>0)srcTime=global%srcDuration;const active=srcTime<srcDuration;if(active){const pos=Math.min(srcFrames-1,srcTime*srcRate),l=sampleAudio(buffer,0,pos),r=buffer.numberOfChannels>1?sampleAudio(buffer,1,pos):l;const peak=Math.max(1,Math.abs(l*volume),Math.abs(r*volume));pcm[i*2]=Math.max(-32768,Math.min(32767,Math.round(l*volume/peak*32767)));pcm[i*2+1]=Math.max(-32768,Math.min(32767,Math.round(r*volume/peak*32767)))}}
-      const ad=new AudioData({format:'s16',sampleRate:AUDIO_SAMPLE_RATE,numberOfFrames:frames,numberOfChannels:AUDIO_CHANNELS,timestamp:Math.round(start/AUDIO_SAMPLE_RATE*1e6),data:pcm});try{encoder.encode(ad)}finally{ad.close()}diag.audioChunks++;await waitEncoderQueue(encoder,AUDIO_QUEUE_LIMIT,signal,diag,'Encoder AAC');if(start%(AUDIO_CHUNK_FRAMES*20)===0)await new Promise(r=>setTimeout(r,0));}
+    const totalFrames=Math.ceil(duration*AUDIO_SAMPLE_RATE),volume=Math.max(0,Math.min(1,Number(track.volume)||0)),srcFrames=buffer.length,srcRate=buffer.sampleRate,srcDuration=Math.max(.001,buffer.duration),fadeIn=Math.max(0,Number(track.fadeIn)||0),fadeOut=Math.max(0,Number(track.fadeOut)||PROJECT_AUDIO_FADE_OUT),playDuration=track.loop?duration:Math.min(duration,srcDuration);
+    for(let start=0;start<totalFrames;start+=AUDIO_CHUNK_FRAMES){
+      checkExportAbort(signal);const frames=Math.min(AUDIO_CHUNK_FRAMES,totalFrames-start),pcm=new Int16Array(frames*AUDIO_CHANNELS);
+      for(let i=0;i<frames;i++){
+        const global=(start+i)/AUDIO_SAMPLE_RATE,active=track.loop?global<duration:global<playDuration;
+        if(active){
+          const srcTime=track.loop?(global%srcDuration):global,pos=Math.min(srcFrames-1,srcTime*srcRate),l=sampleAudio(buffer,0,pos),r=buffer.numberOfChannels>1?sampleAudio(buffer,1,pos):l;
+          let env=1;if(fadeIn>0&&global<fadeIn)env=Math.min(env,global/fadeIn);if(fadeOut>0&&global>Math.max(0,playDuration-fadeOut))env=Math.min(env,Math.max(0,(playDuration-global)/fadeOut));
+          pcm[i*2]=Math.max(-32768,Math.min(32767,Math.round(l*volume*env*32767)));pcm[i*2+1]=Math.max(-32768,Math.min(32767,Math.round(r*volume*env*32767)));
+        }
+      }
+      const ad=new AudioData({format:'s16',sampleRate:AUDIO_SAMPLE_RATE,numberOfFrames:frames,numberOfChannels:AUDIO_CHANNELS,timestamp:Math.round(start/AUDIO_SAMPLE_RATE*1e6),data:pcm});try{encoder.encode(ad)}finally{ad.close()}diag.audioChunks++;await waitEncoderQueue(encoder,AUDIO_QUEUE_LIMIT,signal,diag,'Encoder AAC');if(start%(AUDIO_CHUNK_FRAMES*20)===0)await new Promise(r=>setTimeout(r,0));
+    }
   }
 
   async function createMuxTargetSession(M,duration,estimatedBytes){
@@ -4260,10 +4301,10 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
 
   async function renderCorvoMp4V2(sceneList,{project=false,signal=null}={}){
     if(!sceneList.length)throw Error('Não há cenas para exportar neste formato.');sceneList.forEach(ensureSceneExtras);const format=sceneList[0].format;if(sceneList.some(s=>s.format!==format))throw Error('O projeto mistura 16:9 e 9:16. Escolha um formato no painel Exportar.');
-    const {w:width,h:height}=exportDimensions(format),duration=project?sceneList.reduce((n,s)=>n+(Number(s.duration)||8),0):(Number(sceneList[0].duration)||8),frameCount=Math.max(1,Math.round(duration*EXPORT_FPS)),frameDuration=Math.round(1e6/EXPORT_FPS),diag=makeExportDiagnostics(duration,frameCount);diag.format=format;currentExportDiagnostics=diag;
-    const estimatedBytes=Math.ceil(duration*((EXPORT_BITRATE+(projectAudioTrack.data?AUDIO_BITRATE:0))/8)*1.30+16*1024*1024);
+    const {w:width,h:height}=exportDimensions(format),duration=project?projectDurationWithTransitions(sceneList):(Number(sceneList[0].duration)||8),frameCount=Math.max(1,Math.round(duration*EXPORT_FPS)),frameDuration=Math.round(1e6/EXPORT_FPS),diag=makeExportDiagnostics(duration,frameCount);diag.format=format;currentExportDiagnostics=diag;
+    const hasProjectAudio=!!projectAudioSource(),estimatedBytes=Math.ceil(duration*((EXPORT_BITRATE+(hasProjectAudio?AUDIO_BITRATE:0))/8)*1.30+16*1024*1024);
     exportSetProgress(1,'Carregando muxer local…');const M=await ensureCorvoMuxer();exportSetProgress(3,'Preparando mídias…');await prewarmExportAssets(sceneList);checkExportAbort(signal);
-    const videoConfig=await resolveCorvoH264(width,height),useAudio=!!projectAudioTrack.data;let audioBuffer=null,audioConfig=null;if(useAudio){exportSetProgress(4,'Preparando áudio AAC…');audioConfig=await resolveCorvoAac();audioBuffer=await decodeProjectAudio(projectAudioTrack)}
+    const videoConfig=await resolveCorvoH264(width,height),useAudio=!!projectAudioSource();let audioBuffer=null,audioConfig=null;if(useAudio){exportSetProgress(4,'Preparando faixa principal adaptativa…');audioConfig=await resolveCorvoAac();audioBuffer=await decodeProjectAudio(projectAudioTrack)}
     const session=await createMuxTargetSession(M,duration,estimatedBytes);diag.storage=session.storage;const storageEl=$('#corvoStorageStatus');if(storageEl)storageEl.textContent=`Exportando via ${session.storage}${session.storage==='OPFS'?' · RAM protegida':''}.`;
     const muxOptions={target:session.target,video:{codec:'avc',width,height,frameRate:EXPORT_FPS},fastStart:session.storage==='OPFS'?false:'in-memory',firstTimestampBehavior:'offset'};if(useAudio)muxOptions.audio={codec:'aac',numberOfChannels:AUDIO_CHANNELS,sampleRate:AUDIO_SAMPLE_RATE};const muxer=new M.Muxer(muxOptions);
     let failure=null;const videoEncoder=new VideoEncoder({output:(chunk,meta)=>{try{muxer.addVideoChunk(chunk,meta)}catch(err){failure=err}},error:err=>{failure=err}});videoEncoder.configure(videoConfig);
@@ -4285,9 +4326,9 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
     finally{currentExportDiagnostics=null;if(videoEncoder.state!=='closed')videoEncoder.close();if(audioEncoder&&audioEncoder.state!=='closed')audioEncoder.close()}
   }
   async function exportSceneMp4V2(){
-    if(exportBusy)return;exportAbortController=new AbortController();exportSetBusy(true);try{const r=await renderCorvoMp4V2([deepClone(ensureSceneExtras(state))],{project:false,signal:exportAbortController.signal});downloadExportBlob(r.blob,`corvo-cena-${String(activeScene+1).padStart(2,'0')}-${r.width}x${r.height}-30fps.mp4`);setTimeout(()=>r.cleanup?.(),45000);status(`MP4 da cena exportado · ${r.width}×${r.height} · 30 FPS${projectAudioTrack.data?' · AAC':''}.`)}catch(err){const cancelled=err?.name==='AbortError';exportSetProgress(0,cancelled?'Exportação cancelada.':err?.message||'Falha ao exportar MP4.');status(cancelled?'Exportação cancelada com segurança.':err?.message||'Falha ao exportar MP4.')}finally{exportAbortController=null;exportSetBusy(false);syncV2Ui()}}
+    if(exportBusy)return;exportAbortController=new AbortController();exportSetBusy(true);try{const r=await renderCorvoMp4V2([deepClone(ensureSceneExtras(state))],{project:false,signal:exportAbortController.signal});downloadExportBlob(r.blob,`corvo-cena-${String(activeScene+1).padStart(2,'0')}-${r.width}x${r.height}-30fps.mp4`);setTimeout(()=>r.cleanup?.(),45000);status(`MP4 da cena exportado · ${r.width}×${r.height} · 30 FPS${projectAudioSource()?' · AAC':''}.`)}catch(err){const cancelled=err?.name==='AbortError';exportSetProgress(0,cancelled?'Exportação cancelada.':err?.message||'Falha ao exportar MP4.');status(cancelled?'Exportação cancelada com segurança.':err?.message||'Falha ao exportar MP4.')}finally{exportAbortController=null;exportSetBusy(false);syncV2Ui()}}
   async function exportProjectMp4V2(){
-    if(exportBusy)return;const list=selectedProjectScenes();if(!list.length){status('Não há cenas no formato selecionado.');return}const choice=$('#corvoProjectFormat')?.value||'auto';if(choice==='auto'&&new Set(list.map(s=>s.format)).size>1){status('O projeto mistura 16:9 e 9:16. Em Exportar, escolha “somente 16:9” ou “somente 9:16”.');return}exportAbortController=new AbortController();exportSetBusy(true);try{const r=await renderCorvoMp4V2(list,{project:true,signal:exportAbortController.signal}),suffix=choice==='auto'?'':`-${choice.replace(':','x')}`;downloadExportBlob(r.blob,`corvo-projeto-${list.length}-cenas${suffix}-${r.width}x${r.height}-30fps.mp4`);setTimeout(()=>r.cleanup?.(),45000);status(`MP4 do projeto exportado · ${list.length} cenas · 30 FPS${projectAudioTrack.data?' · AAC':''}.`)}catch(err){const cancelled=err?.name==='AbortError';exportSetProgress(0,cancelled?'Exportação cancelada.':err?.message||'Falha ao exportar projeto.');status(cancelled?'Exportação cancelada com segurança.':err?.message||'Falha ao exportar projeto.')}finally{exportAbortController=null;exportSetBusy(false);syncV2Ui()}}
+    if(exportBusy)return;const list=selectedProjectScenes();if(!list.length){status('Não há cenas no formato selecionado.');return}const choice=$('#corvoProjectFormat')?.value||'auto';if(choice==='auto'&&new Set(list.map(s=>s.format)).size>1){status('O projeto mistura 16:9 e 9:16. Em Exportar, escolha “somente 16:9” ou “somente 9:16”.');return}exportAbortController=new AbortController();exportSetBusy(true);try{const r=await renderCorvoMp4V2(list,{project:true,signal:exportAbortController.signal}),suffix=choice==='auto'?'':`-${choice.replace(':','x')}`;downloadExportBlob(r.blob,`corvo-projeto-${list.length}-cenas${suffix}-${r.width}x${r.height}-30fps.mp4`);setTimeout(()=>r.cleanup?.(),45000);status(`MP4 do projeto exportado · ${list.length} cenas · 30 FPS${projectAudioSource()?' · AAC':''}.`)}catch(err){const cancelled=err?.name==='AbortError';exportSetProgress(0,cancelled?'Exportação cancelada.':err?.message||'Falha ao exportar projeto.');status(cancelled?'Exportação cancelada com segurança.':err?.message||'Falha ao exportar projeto.')}finally{exportAbortController=null;exportSetBusy(false);syncV2Ui()}}
 
   $('#corvoCancelExport').onclick=()=>{if(exportAbortController&&!exportAbortController.signal.aborted){exportAbortController.abort();exportSetProgress(0,'Cancelando…');status('Cancelando exportação com segurança…')}};
   $('#corvoExportSceneMp4').onclick=()=>{if(!updateExporterCompatibility()){status('MP4 requer WebCodecs. Use Chrome ou Edge atualizado.');return}return exportSceneMp4V2()};
@@ -4295,16 +4336,16 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
 
   // Compatibilidade: áudio carregado requer AudioEncoder, vídeo silencioso continua disponível sem ele.
   const updateExporterCompatibilityBeforeV2=updateExporterCompatibility;
-  updateExporterCompatibility=function(){const videoOk=updateExporterCompatibilityBeforeV2();const msg=$('#corvoExportMessage');if(projectAudioTrack.data&&typeof AudioEncoder!=='function'&&msg)msg.textContent='Vídeo disponível, mas AAC requer AudioEncoder. Remova o áudio ou use Chrome/Edge atualizado.';return videoOk};
+  updateExporterCompatibility=function(){const videoOk=updateExporterCompatibilityBeforeV2();const msg=$('#corvoExportMessage');if(projectAudioSource()&&typeof AudioEncoder!=='function'&&msg)msg.textContent='Vídeo disponível, mas AAC requer AudioEncoder. Remova o áudio ou use Chrome/Edge atualizado.';return videoOk};
 
   // Projeto v4 preserva áudio, transições e cenários animados.
   $('#save').onclick=()=>{const payload={version:4,kind:'corvo-project',mcp_schema:'corvo-quiz-app/v2',audio:projectAudioTrack,scenes:scenes.map(s=>ensureSceneExtras(deepClone(s)))};const url=URL.createObjectURL(new Blob([JSON.stringify(payload)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='corvo-projeto.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);dirty=false;status('Projeto salvo com cenas, transições, áudio e mídias.')};
-  $('#modelFile').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;if(dirty&&!confirm('Abrir outro projeto e substituir o atual? Salve antes se quiser guardar suas alterações.'))return;try{if(f.size>500*1024*1024)throw Error();const v=JSON.parse(await f.text());const list=v.version===4&&v.kind==='corvo-project'?v.scenes:v.version===3&&v.kind==='corvo-project'?v.scenes:v.version===2&&v.kind==='corvo-project'?v.scenes:v.version===1?[v]:null;if(!Array.isArray(list)||!list.length||list.length>1000)throw Error();scenes=list.map(s=>ensureSceneExtras(validateScene(s)));projectAudioTrack=normalizeProjectAudio(v.version===4?v.audio:null);selection.clear();dirty=false;switchScene(0);syncV2Ui();status('Projeto aberto com '+scenes.length+' cena(s).')}catch(err){console.error('CORVO_OPEN_PROJECT',err);status('Projeto inválido ou grande demais. O projeto atual foi preservado.')}};
+  $('#modelFile').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;if(dirty&&!confirm('Abrir outro projeto e substituir o atual? Salve antes se quiser guardar suas alterações.'))return;try{if(f.size>500*1024*1024)throw Error();const v=JSON.parse(await f.text());const list=v.version===4&&v.kind==='corvo-project'?v.scenes:v.version===3&&v.kind==='corvo-project'?v.scenes:v.version===2&&v.kind==='corvo-project'?v.scenes:v.version===1?[v]:null;if(!Array.isArray(list)||!list.length||list.length>1000)throw Error();scenes=list.map(s=>ensureSceneExtras(validateScene(s)));projectAudioTrack=v.version===4?normalizeProjectAudio(v.audio):(v.version>=1?bundledProjectAudio():normalizeProjectAudio(null));selection.clear();dirty=false;switchScene(0);syncV2Ui();status('Projeto aberto com '+scenes.length+' cena(s).')}catch(err){console.error('CORVO_OPEN_PROJECT',err);status('Projeto inválido ou grande demais. O projeto atual foi preservado.')}};
 
   const schemaBeforeV2=schemaData;
-  schemaData=function(){const out=schemaBeforeV2();out.schema='corvo-quiz-app/v2';out.project_audio={data:'data:audio/* optional',name:'string',volume:'0-1',loop:'boolean'};out.scene_patch.transitionType='cut | crossfade | slide-left | flash | zoom-fade';out.scene_patch.transitionDuration='.15-2 seconds';out.scene_patch.backgroundVideo='data:video/mp4|webm optional';return out};
+  schemaData=function(){const out=schemaBeforeV2();out.schema='corvo-quiz-app/v2';out.project_audio={src:'audio/faixa-principal.mp3 builtin',data:'data:audio/* optional replacement',name:'string',volume:'0-1',loop:'boolean manual',fadeIn:'seconds',fadeOut:'seconds',sourceDuration:'seconds'};out.scene_patch.transitionType='cut | crossfade | slide-left | flash | zoom-fade';out.scene_patch.transitionDuration='.2-5 seconds; independent transition block, normalized timing';out.scene_patch.backgroundVideo='data:video/mp4|webm optional';return out};
   if(window.CorvoQuizMCP)window.CorvoQuizMCP.getSchema=schemaData;
-  window.CorvoExporter={version:'2.1.0',paintFrame:paintCorvoExportFrame,exportPng:exportCurrentScenePng,exportSceneMp4:exportSceneMp4V2,exportProjectMp4:exportProjectMp4V2,renderMp4:renderCorvoMp4V2,compatibility:updateExporterCompatibility,getDiagnostics:()=>$('#corvoDiagnosticsText')?.textContent||''};
+  window.CorvoExporter={version:'2.2.0',paintFrame:paintCorvoExportFrame,exportPng:exportCurrentScenePng,exportSceneMp4:exportSceneMp4V2,exportProjectMp4:exportProjectMp4V2,renderMp4:renderCorvoMp4V2,compatibility:updateExporterCompatibility,getDiagnostics:()=>$('#corvoDiagnosticsText')?.textContent||''};
   syncV2Ui();updateExporterCompatibility();
 }
 
@@ -4344,6 +4385,17 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
   function moveField(id,host){move(fieldOf(id),host)}
 
   // CENA
+  const titleSceneSec=sec('Título e número','Ajustes principais sempre à mão');bodies.scene.append(titleSceneSec);
+  moveField('titleInput',titleSceneSec);
+  const titleScaleField=fieldOf('sceneTitleTextScale');if(titleScaleField){const label=titleScaleField.querySelector(':scope > span');if(label)label.textContent='Tamanho do título';titleSceneSec.append(titleScaleField)}
+  const badgeScaleField=fieldOf('sceneBadgeScale');if(badgeScaleField){const label=badgeScaleField.querySelector(':scope > span');if(label)label.textContent='Tamanho do quadrado verde + numeral';titleSceneSec.append(badgeScaleField)}
+  moveField('titleColor',titleSceneSec);
+  const badgeControls=q('.scene-badge-controls');
+  if(badgeControls){
+    const heading=badgeControls.querySelector('.option-head b');if(heading)heading.textContent='Posição do quadrado verde';
+    const emptyTitleScaleBox=badgeControls.querySelector('.scene-title-scale-controls');if(emptyTitleScaleBox&&!emptyTitleScaleBox.querySelector('.field'))emptyTitleScaleBox.remove();
+    const details=document.createElement('details');details.className='compact-details';const sm=document.createElement('summary');sm.textContent='Posição do quadrado verde e opções avançadas';details.append(sm,badgeControls);titleSceneSec.append(details);
+  }
   const sceneBasics=sec('Cena','Formato, tipo e duração');bodies.scene.append(sceneBasics);
   moveField('sceneFormat',sceneBasics);move(byId('applyFormat'),sceneBasics);moveField('sceneType',sceneBasics);move(byId('applySceneType'),sceneBasics);moveField('duration',sceneBasics);moveField('sceneTransition',sceneBasics);moveField('transitionDuration',sceneBasics);move(byId('transitionDurationValue'),sceneBasics);
   const bgSec=sec('Cenário','Imagem, movimento e desfoque');bodies.scene.append(bgSec);
@@ -4352,7 +4404,6 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
   // CARDS
   const cardGeneral=sec('Configuração dos cards','Só os cards ativos aparecem abaixo');bodies.cards.append(cardGeneral);
   moveField('optionCount',cardGeneral);moveField('frameShape',cardGeneral);move(byId('applyFrameShape'),cardGeneral);const cardTextGlobal=q('.card-text-global');if(cardTextGlobal)cardGeneral.append(cardTextGlobal);moveField('motion',cardGeneral);moveField('optionSkin',cardGeneral);move(byId('applySkin'),cardGeneral);moveField('optionEffects',cardGeneral);move(byId('applyEffects'),cardGeneral);
-  const titleSec=sec('Título do quiz');bodies.cards.append(titleSec);moveField('titleInput',titleSec);moveField('titleColor',titleSec);const badgeControls=q('.scene-badge-controls');if(badgeControls){const details=document.createElement('details');details.className='compact-details';const sm=document.createElement('summary');sm.textContent='Posição, escala do título e número da cena';details.append(sm,badgeControls);titleSec.append(details)}
   const activeCardSummary=document.createElement('div');activeCardSummary.className='cards-active-summary';bodies.cards.append(activeCardSummary);
   const optionsHost=document.createElement('div');optionsHost.className='active-options-host';bodies.cards.append(optionsHost);
   const optionEls={};for(const k of ['a','b','c','d']){const cb=q(`[data-option-visible="${k}"]`);const opt=cb?.closest('.option');if(opt){optionEls[k]=opt;optionsHost.append(opt)}}
@@ -4404,7 +4455,7 @@ $('#exportScaffold').onclick=()=>{try{const svg=scaffoldSVG();const url=URL.crea
   function syncCards(){let count=0;for(const k of ['a','b','c','d']){const cb=q(`[data-option-visible="${k}"]`);const visible=!!cb?.checked;if(optionEls[k])optionEls[k].hidden=!visible;if(visible)count++;}activeCardSummary.textContent=count+' card'+(count===1?'':'s')+' ativo'+(count===1?'':'s')+'. Ajustes de cards não usados ficam ocultos.';}
   function syncPng(){let active=0;pngSlots.forEach((slot,i)=>{const yes=pngIsActive(i);slot.hidden=!yes;if(yes){active++;const meta=byId('overlay-meta-'+(i+1))?.textContent||'Camada carregada';const small=slot.querySelector('.compact-slot-head small');if(small)small.textContent=meta.replace(/^.*?·\s*/,'').slice(0,80);const upload=q(`[data-overlay-upload="${i}"]`);if(upload)upload.textContent='Trocar PNG';}});pngSummary.textContent=active?active+' camada'+(active===1?'':'s')+' PNG ativa'+(active===1?'':'s')+'.':'Nenhum PNG adicionado.';addPng.disabled=active>=pngSlots.length;addPng.textContent=active>=pngSlots.length?'3 PNGs adicionados':'＋ Adicionar PNG';qa('[data-overlay-export]').forEach((b,i)=>b.hidden=!pngIsActive(i));pngExportTitle.hidden=active===0;pngExportGrid.hidden=active===0;if(active===0&&!overlayPanel.querySelector('.clean-empty')){const empty=document.createElement('div');empty.className='clean-empty';empty.textContent='Adicione uma camada somente quando precisar de mão, braço ou outro elemento extra.';overlayPanel.append(empty)}const empty=overlayPanel.querySelector('.clean-empty');if(empty)empty.hidden=active>0;}
   function syncText(){let active=0;textBlocks.forEach((block,i)=>{const cb=q(`[data-text-visible="${i}"]`);const yes=!!cb?.checked;block.hidden=!yes;if(yes)active++;});textSummary.textContent=active?active+' bloco'+(active===1?'':'s')+' de texto ativo'+(active===1?'':'s')+'.':'Nenhum texto ativo.';addText.disabled=active>=textBlocks.length;addText.textContent=active>=textBlocks.length?'3 textos ativos':'＋ Adicionar texto';}
-  function syncType(){const scene=q('#scene'),isText=scene?.dataset.sceneType==='text'||byId('sceneType')?.value==='text';buttons.cards.hidden=isText;buttons.text.hidden=!isText;if(isText&&activeTab==='cards')activate('text');if(!isText&&activeTab==='text')activate('cards');}
+  function syncType(){const scene=q('#scene'),isText=scene?.dataset.sceneType==='text'||byId('sceneType')?.value==='text';buttons.cards.hidden=isText;buttons.text.hidden=!isText;if(titleSceneSec)titleSceneSec.hidden=isText;if(isText&&activeTab==='cards')activate('text');if(!isText&&activeTab==='text')activate('cards');}
   function syncSummary(){const type=q('#scene')?.dataset.sceneType==='text'?'Texto':'Quiz';const cards=qa('[data-option-visible]').filter(x=>x.checked).length;const pngs=pngSlots.filter((_,i)=>pngIsActive(i)).length;summary.textContent=`${type}${type==='Quiz'?` · ${cards} card${cards===1?'':'s'}`:''} · ${pngs} PNG`;}
   function sync(){syncCards();syncPng();syncText();syncType();syncSummary();}
 
