@@ -1,54 +1,16 @@
-CORVO STUDIO — EXPORTER V1.1 · FIDELITY PASS
-Data: 2026-09-07
-Base: versão 19
+CORVO EXPORTER V1.2 — FULL FX PARITY
 
-IMPLEMENTADO
-- PNG da cena atual.
-- MP4 da cena atual.
-- MP4 do projeto inteiro.
-- 30 FPS.
-- H.264 via WebCodecs.
-- Bitrate alvo: 8 Mbps.
-- Keyframe a cada 4 s.
-- Fila do encoder limitada a 6 frames.
-- Progresso visual no painel Exportar.
-- 16:9 = 1920x1080.
-- 9:16 = 1080x1920.
+Base: versão 20 / exportador Canvas determinístico.
 
-REFINAMENTO V1.1 — PARIDADE COM O CANVAS
-- Título agora usa peso, espaçamento, line-height e quebra balanceada equivalentes à prévia.
-- Em 9:16, títulos como "QUAL ARMA VOCÊ ESCOLHERIA?" evitam palavra órfã e preservam a composição do canvas.
-- Faixa do título e selo numérico usam raios, gradientes e sombras mais próximos do editor.
-- Cards não são mais tingidos indevidamente pela cor da opção no skin Neon.
-- Skins Neon, Branca, Vidro e Grafite receberam gradientes, bordas, raios e sombras alinhados ao canvas.
-- Badge A/B/C/D corrigido, especialmente no 9:16, onde estava menor no exportador antigo.
-- Aba do texto da opção usa proporções, gradiente, brilho, borda, tracking e altura do V30 do editor.
-- Área da imagem e seus cantos seguem os mesmos recuos da prévia.
-- Arte original das opções A/B também possui fallback no renderer quando nenhuma imagem customizada foi carregada.
-- Shade do cenário foi alinhado ao gradiente usado no canvas.
+Refinamentos desta revisão:
+- mantém a correção do título e da quebra balanceada;
+- restaura no exportador o pulso real da borda/glow do card;
+- exporta as partículas/sparks que já existiam no Canvas do editor;
+- Brilho premium agora exporta aura externa, sweep luminoso e iluminação/reflexos dentro da imagem;
+- Luz alternada agora exporta aura pulsante e sweep sobre a imagem;
+- Poeira e Poder oculto receberam sobreposições compatíveis com o Canvas;
+- selo A/B acompanha o glow específico do efeito;
+- PNG usa um frame representativo do efeito escolhido em vez de sempre capturar t=0 (quando alguns efeitos estão invisíveis por definição);
+- MP4 continua H.264, 30 FPS, 8 Mbps.
 
-ORDEM DE PINTURA
-1. Fundo.
-2. PNGs depth=under.
-3. Cards A-D.
-4. PNGs depth=over.
-5. Título.
-6. Numeral da cena.
-
-O renderer usa o estado das cenas, sem gravar a tela do navegador.
-Ele respeita posição, escala, moldura quadrada/redonda, texto, cores,
-rotação/inclinação aproximada, efeitos suportados e animações atuais.
-
-LIMITES
-- Sem áudio no MP4 ainda.
-- Sem transições especiais entre cenas ainda.
-- Projeto inteiro exige que todas as cenas usem o mesmo formato.
-- O mp4-muxer é carregado sob demanda. O editor tenta primeiro ./mp4-muxer.js
-  e depois jsDelivr/unpkg. Para operação totalmente offline, coloque
-  mp4-muxer.js ao lado do index.html.
-
-PRÓXIMA ETAPA RECOMENDADA
-- Áudio AAC.
-- armazenamento temporário para projetos longos.
-- recuperação resiliente de fundos animados.
-- diagnóstico de gargalo semelhante ao Forma.
+Objetivo: aproximar o frame final do Canvas montado, inclusive na iluminação e nos efeitos animados, e não apenas na geometria/tipografia.
