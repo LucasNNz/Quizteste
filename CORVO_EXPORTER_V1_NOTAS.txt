@@ -1,16 +1,81 @@
-CORVO EXPORTER V1.2 — FULL FX PARITY
+CORVO EXPORTER V2.1 — PRODUÇÃO / FORMA PARITY
 
-Base: versão 20 / exportador Canvas determinístico.
+Base: Corvo Quiz Studio v30 + pipeline inspirado no Forma(6).
 
-Refinamentos desta revisão:
-- mantém a correção do título e da quebra balanceada;
-- restaura no exportador o pulso real da borda/glow do card;
-- exporta as partículas/sparks que já existiam no Canvas do editor;
-- Brilho premium agora exporta aura externa, sweep luminoso e iluminação/reflexos dentro da imagem;
-- Luz alternada agora exporta aura pulsante e sweep sobre a imagem;
-- Poeira e Poder oculto receberam sobreposições compatíveis com o Canvas;
-- selo A/B acompanha o glow específico do efeito;
-- PNG usa um frame representativo do efeito escolhido em vez de sempre capturar t=0 (quando alguns efeitos estão invisíveis por definição);
-- MP4 continua H.264, 30 FPS, 8 Mbps.
+ENTREGUE NESTA REVISÃO
 
-Objetivo: aproximar o frame final do Canvas montado, inclusive na iluminação e nos efeitos animados, e não apenas na geometria/tipografia.
+1. ÁUDIO AAC NO MP4
+- áudio opcional do projeto;
+- carregamento por arquivo de áudio;
+- volume regulável;
+- repetição até o fim do vídeo opcional;
+- AAC 48 kHz, estéreo, 192 kbps via WebCodecs/AudioEncoder;
+- vídeo silencioso continua exportável quando não há áudio.
+
+2. TRANSIÇÕES ENTRE CENAS
+- corte direto;
+- dissolver / crossfade;
+- deslizar;
+- flash;
+- zoom + fade;
+- duração regulável por cena (a transição pertence à cena que está entrando).
+
+3. PROJETOS LONGOS / PROTEÇÃO DE RAM
+- até 5 min: ArrayBuffer em memória por padrão;
+- a partir de 5 min: prioriza OPFS / armazenamento temporário;
+- a partir de 10 min: OPFS é obrigatório para evitar estouro de memória;
+- verifica espaço temporário estimado antes de projetos muito longos;
+- remove o arquivo temporário após o download ou aborta com segurança em falha/cancelamento.
+
+4. FUNDO ANIMADO COM RECUPERAÇÃO
+- cenário aceita imagem, MP4 ou WebM;
+- em falha de seek/frame, tenta o tempo solicitado, frame anterior e frame seguinte;
+- mantém cache do último frame válido do vídeo;
+- se um frame de pintura geral falhar, o exportador tenta novamente e pode reutilizar o último frame válido em vez de cancelar imediatamente o projeto;
+- diagnóstico registra seeks falhos, recuperações e falhas duras.
+
+5. MP4-MUXER LOCAL
+- mp4-muxer.js v5.2.2 está incluído no ZIP;
+- o exportador carrega somente o arquivo local;
+- não depende de jsDelivr/unpkg para funcionar;
+- licença MIT do mp4-muxer acompanha o pacote.
+
+6. PARIDADE VISUAL
+- o V2 reutiliza o mesmo painter determinístico já refinado para título, cards, bordas PNG, brilho premium, poder oculto e poeira;
+- PNG e MP4 usam a mesma rotina paintCorvoExportFrame;
+- cenas texto usam o mesmo painter de exportação do preview correspondente;
+- inclinação 3D continua sendo uma aproximação 2D do Canvas, mas efeitos, geometria e iluminação passam pelo mesmo pipeline do render final.
+
+7. DIAGNÓSTICO E SEGURANÇA
+- progresso de exportação;
+- botão Cancelar exportação;
+- backpressure do VideoEncoder/AudioEncoder usando evento dequeue quando disponível;
+- watchdog para encoder travado;
+- tempo total;
+- FPS efetivo;
+- média, p95 e pior tempo de pintura por frame;
+- esperas do encoder e fila máxima;
+- chunks AAC;
+- frames de transição;
+- recuperações/falhas de cenário;
+- frames recuperados e falhas de pintura;
+- tamanho e tipo de armazenamento da saída.
+
+8. FORMATOS MISTURADOS
+- Projeto completo: exige todas as cenas no mesmo formato;
+- opção "Exportar somente 16:9";
+- opção "Exportar somente 9:16";
+- portanto um projeto pode conter os dois formatos sem impedir a exportação por formato.
+
+PERFIL DE PRODUÇÃO
+- MP4: H.264 / AVC;
+- resolução: 1920×1080 ou 1080×1920;
+- 30 FPS;
+- vídeo: 8 Mbps;
+- áudio: AAC 48 kHz estéreo, 192 kbps quando carregado;
+- keyframe aproximadamente a cada 4 segundos.
+
+REQUISITOS DO NAVEGADOR
+- Chrome ou Edge atualizado com WebCodecs para MP4;
+- AudioEncoder é necessário somente quando o projeto contém áudio;
+- OPFS precisa estar disponível para projetos de 10 minutos ou mais.

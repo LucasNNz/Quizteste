@@ -292,3 +292,29 @@ Não criar ferramentas duplicadas de busca dentro do Quiz Studio.
 - URLs de assets/preview podem ser públicas temporárias, assinadas ou capability URLs.
 - Nunca colocar Secret/API key em URL de asset, `postMessage`, projeto JSON ou estado do Quiz.
 
+
+## Exportador V2.1
+
+O projeto salvo pelo editor usa `version: 4` e preserva recursos de exportação avançados.
+
+Campos relevantes por cena:
+
+- `transitionType`: `cut | crossfade | slide-left | flash | zoom-fade`
+- `transitionDuration`: duração da transição em segundos
+- `backgroundVideo`: Data URL opcional de MP4/WebM
+- `backgroundVideoUrl`: URL opcional de MP4/WebM
+
+Áudio do projeto:
+
+```json
+{
+  "audio": {
+    "data": "data:audio/...",
+    "name": "trilha.mp3",
+    "volume": 1,
+    "loop": true
+  }
+}
+```
+
+Para exportação de projeto com cenas 16:9 e 9:16 misturadas, o editor permite selecionar apenas um dos formatos por MP4. O Core não precisa separar o projeto antes de editar.
